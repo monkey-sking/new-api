@@ -194,6 +194,14 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			newAPIError = channelErr
 			break
 		}
+		channelError := *types.NewChannelError(
+			channel.Id,
+			channel.Type,
+			channel.Name,
+			channel.ChannelInfo.IsMultiKey,
+			common.GetContextKeyString(c, constant.ContextKeyChannelKey),
+			channel.GetAutoBan(),
+		)
 
 		addUsedChannel(c, channel.Id)
 		bodyStorage, bodyErr := common.GetBodyStorage(c)
@@ -220,14 +228,16 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 
 		if newAPIError == nil {
+			service.ObserveTimeoutThreshold(channelError, nil)
 			relayInfo.LastError = nil
 			return
 		}
 
 		newAPIError = service.NormalizeViolationFeeError(newAPIError)
+		newAPIError = service.ObserveTimeoutThreshold(channelError, newAPIError)
 		relayInfo.LastError = newAPIError
 
-		processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
+		processChannelError(c, channelError, newAPIError)
 
 		if !shouldRetry(c, newAPIError, common.RetryTimes-retryParam.GetRetry()) {
 			break

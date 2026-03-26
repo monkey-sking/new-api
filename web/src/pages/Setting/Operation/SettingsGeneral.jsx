@@ -52,6 +52,7 @@ export default function GeneralSettings(props) {
     QuotaPerUnit: '',
     RetryTimes: '',
     SamePriorityRetryTimes: '',
+    AutomaticDisableConsecutiveTimeoutCount: '',
     USDExchangeRate: '',
     DisplayTokenStatEnabled: false,
     DefaultCollapseSidebar: false,
@@ -209,6 +210,18 @@ export default function GeneralSettings(props) {
                   initValue={''}
                   placeholder={t('同优先级重试次数')}
                   onChange={handleFieldChange('SamePriorityRetryTimes')}
+                  showClear
+                />
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.Input
+                  field={'AutomaticDisableConsecutiveTimeoutCount'}
+                  label={t('连续超时禁用阈值')}
+                  initValue={''}
+                  placeholder={t('0 表示关闭')}
+                  onChange={handleFieldChange(
+                    'AutomaticDisableConsecutiveTimeoutCount',
+                  )}
                   showClear
                 />
               </Col>

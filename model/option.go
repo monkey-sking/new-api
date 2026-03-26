@@ -45,6 +45,7 @@ func InitOptionMap() {
 	common.OptionMap["TurnstileCheckEnabled"] = strconv.FormatBool(common.TurnstileCheckEnabled)
 	common.OptionMap["RegisterEnabled"] = strconv.FormatBool(common.RegisterEnabled)
 	common.OptionMap["AutomaticDisableChannelEnabled"] = strconv.FormatBool(common.AutomaticDisableChannelEnabled)
+	common.OptionMap["AutomaticDisableConsecutiveTimeoutCount"] = strconv.Itoa(common.AutomaticDisableConsecutiveTimeoutCount)
 	common.OptionMap["AutomaticEnableChannelEnabled"] = strconv.FormatBool(common.AutomaticEnableChannelEnabled)
 	common.OptionMap["LogConsumeEnabled"] = strconv.FormatBool(common.LogConsumeEnabled)
 	common.OptionMap["DisplayInCurrencyEnabled"] = strconv.FormatBool(common.DisplayInCurrencyEnabled)
@@ -353,6 +354,11 @@ func updateOptionMap(key string, value string) (err error) {
 		operation_setting.Price, _ = strconv.ParseFloat(value, 64)
 	case "USDExchangeRate":
 		operation_setting.USDExchangeRate, _ = strconv.ParseFloat(value, 64)
+	case "AutomaticDisableConsecutiveTimeoutCount":
+		common.AutomaticDisableConsecutiveTimeoutCount, _ = strconv.Atoi(value)
+		if common.AutomaticDisableConsecutiveTimeoutCount < 0 {
+			common.AutomaticDisableConsecutiveTimeoutCount = 0
+		}
 	case "MinTopUp":
 		operation_setting.MinTopUp, _ = strconv.Atoi(value)
 	case "StripeApiSecret":

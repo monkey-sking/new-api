@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"strconv"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -43,6 +44,18 @@ func (p *RetryParam) IncreaseRetry() {
 
 func (p *RetryParam) ResetRetryNextTry() {
 	p.resetNextTry = true
+}
+
+func usedChannelIDsFromContext(ctx *gin.Context) map[int]struct{} {
+	used := map[int]struct{}{}
+	for _, raw := range ctx.GetStringSlice("use_channel") {
+		id, err := strconv.Atoi(raw)
+		if err != nil {
+			continue
+		}
+		used[id] = struct{}{}
+	}
+	return used
 }
 
 // CacheGetRandomSatisfiedChannel tries to get a random channel that satisfies the requirements.
@@ -115,7 +128,7 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 			}
 			logger.LogDebug(param.Ctx, "Auto selecting group: %s, priorityRetry: %d", autoGroup, priorityRetry)
 
-			channel, _ = model.GetRandomSatisfiedChannel(autoGroup, param.ModelName, priorityRetry)
+			channel, _ = model.GetRandomSatisfiedChannelWithExcluded(autoGroup, param.ModelName, priorityRetry, usedChannelIDsFromContext(param.Ctx))
 			if channel == nil {
 				// Current group has no available channel for this model, try next group
 				// 当前分组没有该模型的可用渠道，尝试下一个分组
@@ -153,7 +166,7 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 			break
 		}
 	} else {
-		channel, err = model.GetRandomSatisfiedChannel(param.TokenGroup, param.ModelName, param.GetRetry())
+		channel, err = model.GetRandomSatisfiedChannelWithExcluded(param.TokenGroup, param.ModelName, param.GetRetry(), usedChannelIDsFromContext(param.Ctx))
 		if err != nil {
 			return nil, param.TokenGroup, err
 		}
