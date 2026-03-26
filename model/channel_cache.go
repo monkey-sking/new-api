@@ -136,10 +136,11 @@ func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel,
 	}
 	sort.Sort(sort.Reverse(sort.IntSlice(sortedUniquePriorities)))
 
-	if retry >= len(uniquePriorities) {
-		retry = len(uniquePriorities) - 1
+	priorityRetryIndex := PriorityRetryIndex(retry)
+	if priorityRetryIndex >= len(uniquePriorities) {
+		priorityRetryIndex = len(uniquePriorities) - 1
 	}
-	targetPriority := int64(sortedUniquePriorities[retry])
+	targetPriority := int64(sortedUniquePriorities[priorityRetryIndex])
 
 	// get the priority for the given retry number
 	var sumWeight = 0

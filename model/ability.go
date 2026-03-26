@@ -91,8 +91,9 @@ func getPriority(group string, model string, retry int) (int, error) {
 func getChannelQuery(group string, model string, retry int) (*gorm.DB, error) {
 	maxPrioritySubQuery := DB.Model(&Ability{}).Select("MAX(priority)").Where(commonGroupCol+" = ? and model = ? and enabled = ?", group, model, true)
 	channelQuery := DB.Where(commonGroupCol+" = ? and model = ? and enabled = ? and priority = (?)", group, model, true, maxPrioritySubQuery)
-	if retry != 0 {
-		priority, err := getPriority(group, model, retry)
+	priorityRetryIndex := PriorityRetryIndex(retry)
+	if priorityRetryIndex != 0 {
+		priority, err := getPriority(group, model, priorityRetryIndex)
 		if err != nil {
 			return nil, err
 		} else {
