@@ -19,6 +19,36 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+func authDebugPrefix(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "<empty>"
+	}
+	hasBearer := false
+	if strings.HasPrefix(raw, "Bearer ") || strings.HasPrefix(raw, "bearer ") {
+		hasBearer = true
+		raw = strings.TrimSpace(raw[7:])
+	}
+	switch {
+	case strings.HasPrefix(raw, "http://"), strings.HasPrefix(raw, "https://"):
+		if len(raw) > 48 {
+			raw = raw[:48] + "...(truncated)"
+		}
+		if hasBearer {
+			return "Bearer url:" + raw
+		}
+		return "url:" + raw
+	default:
+		if len(raw) > 8 {
+			raw = raw[:8] + "..."
+		}
+		if hasBearer {
+			return "Bearer key:" + raw
+		}
+		return "key:" + raw
+	}
+}
+
 func validUserInfo(username string, role int) bool {
 	// check username is empty
 	if strings.TrimSpace(username) == "" {
@@ -309,7 +339,22 @@ func TokenAuth() func(c *gin.Context) {
 			}
 		}
 		if err != nil {
-			abortWithOpenAiMessage(c, http.StatusUnauthorized, err.Error())
+			displayKey := key
+			if len(displayKey) > 4 {
+				displayKey = displayKey[:4]
+			}
+			logger.LogError(c, fmt.Sprintf(
+				"TokenAuth debug: path=%s auth=%s x-api-key=%s mj-api-secret=%s x-goog-api-key=%s query_key=%s ws-protocol=%t",
+				c.Request.URL.Path,
+				authDebugPrefix(c.Request.Header.Get("Authorization")),
+				authDebugPrefix(c.Request.Header.Get("x-api-key")),
+				authDebugPrefix(c.Request.Header.Get("mj-api-secret")),
+				authDebugPrefix(c.Request.Header.Get("x-goog-api-key")),
+				authDebugPrefix(c.Query("key")),
+				c.Request.Header.Get("Sec-WebSocket-Protocol") != "",
+			))
+			logger.LogError(c, fmt.Sprintf("TokenAuth: auth failed for key starting with [%s], err: %v", displayKey, err))
+			abortWithOpenAiMessage(c, http.StatusUnauthorized, fmt.Sprintf("无效的令牌: %v (extracted key starts with: %s)", err, displayKey))
 			return
 		}
 

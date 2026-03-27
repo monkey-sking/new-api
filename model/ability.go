@@ -34,6 +34,7 @@ func GetAllEnableAbilityWithChannels() ([]AbilityWithChannel, error) {
 		Select("abilities.*, channels.type as channel_type").
 		Joins("left join channels on abilities.channel_id = channels.id").
 		Where("abilities.enabled = ?", true).
+		Where("channels.status = ?", common.ChannelStatusEnabled).
 		Scan(&abilities).Error
 	return abilities, err
 }
@@ -41,30 +42,46 @@ func GetAllEnableAbilityWithChannels() ([]AbilityWithChannel, error) {
 func GetGroupEnabledModels(group string) []string {
 	var models []string
 	// Find distinct models
-	DB.Table("abilities").Where(commonGroupCol+" = ? and enabled = ?", group, true).Distinct("model").Pluck("model", &models)
+	DB.Table("abilities").
+		Joins("left join channels on abilities.channel_id = channels.id").
+		Where("abilities."+commonGroupCol+" = ? and abilities.enabled = ?", group, true).
+		Where("channels.status = ?", common.ChannelStatusEnabled).
+		Distinct("model").
+		Pluck("model", &models)
 	return models
 }
 
 func GetEnabledModels() []string {
 	var models []string
 	// Find distinct models
-	DB.Table("abilities").Where("enabled = ?", true).Distinct("model").Pluck("model", &models)
+	DB.Table("abilities").
+		Joins("left join channels on abilities.channel_id = channels.id").
+		Where("abilities.enabled = ?", true).
+		Where("channels.status = ?", common.ChannelStatusEnabled).
+		Distinct("model").
+		Pluck("model", &models)
 	return models
 }
 
 func GetAllEnableAbilities() []Ability {
 	var abilities []Ability
-	DB.Find(&abilities, "enabled = ?", true)
+	DB.Table("abilities").
+		Joins("left join channels on abilities.channel_id = channels.id").
+		Where("abilities.enabled = ?", true).
+		Where("channels.status = ?", common.ChannelStatusEnabled).
+		Find(&abilities)
 	return abilities
 }
 
 func getPriority(group string, model string, retry int) (int, error) {
 
 	var priorities []int
-	err := DB.Model(&Ability{}).
-		Select("DISTINCT(priority)").
-		Where(commonGroupCol+" = ? and model = ? and enabled = ?", group, model, true).
-		Order("priority DESC").              // 按优先级降序排序
+	err := DB.Table("abilities").
+		Select("DISTINCT(abilities.priority)").
+		Joins("left join channels on abilities.channel_id = channels.id").
+		Where("abilities."+commonGroupCol+" = ? and model = ? and abilities.enabled = ?", group, model, true).
+		Where("channels.status = ?", common.ChannelStatusEnabled).
+		Order("abilities.priority DESC").    // 按优先级降序排序
 		Pluck("priority", &priorities).Error // Pluck用于将查询的结果直接扫描到一个切片中
 
 	if err != nil {
@@ -93,14 +110,23 @@ func getChannelQuery(group string, model string, retry int) (*gorm.DB, error) {
 }
 
 func getChannelQueryWithExcluded(group string, model string, retry int, excluded map[int]struct{}) (*gorm.DB, error) {
-	maxPrioritySubQuery := DB.Model(&Ability{}).Select("MAX(priority)").Where(commonGroupCol+" = ? and model = ? and enabled = ?", group, model, true)
-	channelQuery := DB.Where(commonGroupCol+" = ? and model = ? and enabled = ? and priority = (?)", group, model, true, maxPrioritySubQuery)
+	maxPrioritySubQuery := DB.Table("abilities").
+		Select("MAX(abilities.priority)").
+		Joins("left join channels on abilities.channel_id = channels.id").
+		Where("abilities."+commonGroupCol+" = ? and model = ? and abilities.enabled = ?", group, model, true).
+		Where("channels.status = ?", common.ChannelStatusEnabled)
+	channelQuery := DB.Table("abilities").
+		Joins("left join channels on abilities.channel_id = channels.id").
+		Where("abilities."+commonGroupCol+" = ? and model = ? and abilities.enabled = ? and abilities.priority = (?)", group, model, true, maxPrioritySubQuery).
+		Where("channels.status = ?", common.ChannelStatusEnabled)
 	priorityRetryIndex := PriorityRetryIndex(retry)
 	var priorities []int
-	err := DB.Model(&Ability{}).
-		Select("DISTINCT(priority)").
-		Where(commonGroupCol+" = ? and model = ? and enabled = ?", group, model, true).
-		Order("priority DESC").
+	err := DB.Table("abilities").
+		Select("DISTINCT(abilities.priority)").
+		Joins("left join channels on abilities.channel_id = channels.id").
+		Where("abilities."+commonGroupCol+" = ? and model = ? and abilities.enabled = ?", group, model, true).
+		Where("channels.status = ?", common.ChannelStatusEnabled).
+		Order("abilities.priority DESC").
 		Pluck("priority", &priorities).Error
 	if err != nil {
 		return nil, err
@@ -121,7 +147,9 @@ func getChannelQueryWithExcluded(group string, model string, retry int, excluded
 			candidatePriority := priorities[idx]
 			var count int64
 			err = DB.Model(&Ability{}).
-				Where(commonGroupCol+" = ? and model = ? and enabled = ? and priority = ?", group, model, true, candidatePriority).
+				Joins("left join channels on abilities.channel_id = channels.id").
+				Where("abilities."+commonGroupCol+" = ? and model = ? and abilities.enabled = ? and abilities.priority = ?", group, model, true, candidatePriority).
+				Where("channels.status = ?", common.ChannelStatusEnabled).
 				Where("channel_id NOT IN ?", excludedIDs).
 				Count(&count).Error
 			if err != nil {
@@ -133,7 +161,10 @@ func getChannelQueryWithExcluded(group string, model string, retry int, excluded
 			}
 		}
 	}
-	channelQuery = DB.Where(commonGroupCol+" = ? and model = ? and enabled = ? and priority = ?", group, model, true, priorityToUse)
+	channelQuery = DB.Table("abilities").
+		Joins("left join channels on abilities.channel_id = channels.id").
+		Where("abilities."+commonGroupCol+" = ? and model = ? and abilities.enabled = ? and abilities.priority = ?", group, model, true, priorityToUse).
+		Where("channels.status = ?", common.ChannelStatusEnabled)
 	if excluded != nil && len(excluded) > 0 {
 		excludedIDs := make([]int, 0, len(excluded))
 		for id := range excluded {
@@ -158,9 +189,9 @@ func GetChannelWithExcluded(group string, model string, retry int, excluded map[
 		return nil, err
 	}
 	if common.UsingSQLite || common.UsingPostgreSQL {
-		err = channelQuery.Order("weight DESC").Find(&abilities).Error
+		err = channelQuery.Order("abilities.weight DESC").Find(&abilities).Error
 	} else {
-		err = channelQuery.Order("weight DESC").Find(&abilities).Error
+		err = channelQuery.Order("abilities.weight DESC").Find(&abilities).Error
 	}
 	if err != nil {
 		return nil, err

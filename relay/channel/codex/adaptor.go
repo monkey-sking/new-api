@@ -41,7 +41,10 @@ func (a *Adaptor) Init(info *relaycommon.RelayInfo) {
 }
 
 func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayInfo, request *dto.GeneralOpenAIRequest) (any, error) {
-	return nil, errors.New("codex channel: /v1/chat/completions endpoint not supported")
+	// Codex models also support /v1/chat/completions for better compatibility with standard plugins.
+	// We'll wrap it into a responses-style request in the subsequent handling or just pass it as is
+	// if the upstream can handle it (though usually it requires instructions).
+	return request, nil
 }
 
 func (a *Adaptor) ConvertRerankRequest(c *gin.Context, relayMode int, request dto.RerankRequest) (any, error) {
@@ -112,7 +115,9 @@ func (a *Adaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, request
 }
 
 func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (usage any, err *types.NewAPIError) {
-	if info.RelayMode != relayconstant.RelayModeResponses && info.RelayMode != relayconstant.RelayModeResponsesCompact {
+	if info.RelayMode != relayconstant.RelayModeResponses &&
+		info.RelayMode != relayconstant.RelayModeResponsesCompact &&
+		info.RelayMode != relayconstant.RelayModeChatCompletions {
 		return nil, types.NewError(errors.New("codex channel: endpoint not supported"), types.ErrorCodeInvalidRequest)
 	}
 
@@ -135,12 +140,30 @@ func (a *Adaptor) GetChannelName() string {
 }
 
 func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
-	if info.RelayMode != relayconstant.RelayModeResponses && info.RelayMode != relayconstant.RelayModeResponsesCompact {
-		return "", errors.New("codex channel: only /v1/responses and /v1/responses/compact are supported")
+	if info.RelayMode != relayconstant.RelayModeResponses &&
+		info.RelayMode != relayconstant.RelayModeResponsesCompact &&
+		info.RelayMode != relayconstant.RelayModeChatCompletions {
+		return "", errors.New("codex channel: only /v1/responses and /v1/chat/completions are supported")
 	}
-	path := "/backend-api/codex/responses"
-	if info.RelayMode == relayconstant.RelayModeResponsesCompact {
-		path = "/backend-api/codex/responses/compact"
+
+	// 判断上游是否为 chatgpt.com 官方后端，使用内部路径；
+	// 否则（第三方中转）使用标准 OpenAI 兼容路径。
+	isChatGPTBackend := strings.Contains(info.ChannelBaseUrl, "chatgpt.com")
+
+	var path string
+	if isChatGPTBackend {
+		path = "/backend-api/codex/responses"
+		if info.RelayMode == relayconstant.RelayModeResponsesCompact {
+			path = "/backend-api/codex/responses/compact"
+		}
+	} else {
+		path = "/v1/responses"
+		if info.RelayMode == relayconstant.RelayModeResponsesCompact {
+			path = "/v1/responses/compact"
+		}
+		if info.RelayMode == relayconstant.RelayModeChatCompletions {
+			path = "/v1/chat/completions"
+		}
 	}
 	return relaycommon.GetFullRequestURL(info.ChannelBaseUrl, path, info.ChannelType), nil
 }

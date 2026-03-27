@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	appconstant "github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/logger"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
@@ -19,6 +20,13 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+func truncateResponsesDebugString(s string, max int) string {
+	if max <= 0 || len(s) <= max {
+		return s
+	}
+	return s[:max] + "...(truncated)"
+}
 
 func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types.NewAPIError) {
 	info.InitChannelMeta(c)
@@ -105,6 +113,13 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 		if common.DebugEnabled {
 			println("requestBody: ", string(jsonData))
 		}
+		logger.LogInfo(c, fmt.Sprintf(
+			"responses debug request: path=%s model=%s stream=%v body=%s",
+			c.Request.URL.Path,
+			request.Model,
+			request.Stream,
+			truncateResponsesDebugString(string(jsonData), 4096),
+		))
 		requestBody = bytes.NewBuffer(jsonData)
 	}
 

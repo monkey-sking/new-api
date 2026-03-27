@@ -73,7 +73,17 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	var (
 		newAPIError *types.NewAPIError
 		ws          *websocket.Conn
+		relayInfo   *relaycommon.RelayInfo
 	)
+
+	// 提前检测流式请求标识和协议类型，确保即便在鉴权或模型匹配阶段报错，也能返回 200 OK SSE
+	path := c.Request.URL.Path
+	if strings.Contains(path, "/responses") {
+		// 预设协议模式，用于 defer 中的错误封装
+		relayInfo = &relaycommon.RelayInfo{
+			RelayMode: relayconstant.RelayModeResponses,
+		}
+	}
 
 	if relayFormat == types.RelayFormatOpenAIRealtime {
 		var err error
@@ -98,9 +108,46 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 					"error": newAPIError.ToClaudeError(),
 				})
 			default:
-				c.JSON(newAPIError.StatusCode, gin.H{
-					"error": newAPIError.ToOpenAIError(),
-				})
+				var isStream bool
+				if relayInfo != nil {
+					isStream = relayInfo.IsStream
+				} else {
+					bodyStorage, _ := common.GetBodyStorage(c)
+					if bodyStorage != nil {
+						bodyBytes, err := bodyStorage.Bytes()
+						if err == nil {
+							isStream = strings.Contains(string(bodyBytes), `"stream":true`) ||
+								strings.Contains(string(bodyBytes), `"stream": true`)
+						}
+					}
+				}
+
+				if isStream {
+					// 调试日志：捕获准备发回客户端的流式数据开头
+					logger.LogInfo(c, fmt.Sprintf("[DUMP] Sending Stream Error Response (Forced 200 OK): %v", newAPIError.ToOpenAIError()))
+
+					// 根据协议类型决定输出格式
+					if relayInfo != nil && (relayInfo.RelayMode == relayconstant.RelayModeResponses || relayInfo.RelayMode == relayconstant.RelayModeResponsesCompact) {
+						_ = helper.WriteResponsesErrorStream(c, newAPIError.ToOpenAIError(), relayInfo.UpstreamModelName)
+					} else {
+						// 针对流式请求，强制返回 200 OK，但在 data 中传递错误信息。
+						c.Writer.Header().Set("Content-Type", "text/event-stream")
+						c.Writer.Header().Set("Cache-Control", "no-cache")
+						c.Writer.Header().Set("Connection", "keep-alive")
+						c.Writer.WriteHeader(http.StatusOK)
+
+						errorData, _ := common.Marshal(gin.H{
+							"error": newAPIError.ToOpenAIError(),
+						})
+						_, _ = c.Writer.Write([]byte(fmt.Sprintf("data: %s\n\n", string(errorData))))
+						_, _ = c.Writer.Write([]byte("data: [DONE]\n\n"))
+					}
+					c.Writer.Flush()
+				} else {
+					c.JSON(newAPIError.StatusCode, gin.H{
+						"error": newAPIError.ToOpenAIError(),
+					})
+				}
 			}
 		}
 	}()
@@ -116,7 +163,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		return
 	}
 
-	relayInfo, err := relaycommon.GenRelayInfo(c, relayFormat, request, ws)
+	relayInfo, err = relaycommon.GenRelayInfo(c, relayFormat, request, ws)
 	if err != nil {
 		newAPIError = types.NewError(err, types.ErrorCodeGenRelayInfoFailed)
 		return
@@ -228,12 +275,14 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 
 		if newAPIError == nil {
+			service.ObserveFailureThreshold(channelError, nil)
 			service.ObserveTimeoutThreshold(channelError, nil)
 			relayInfo.LastError = nil
 			return
 		}
 
 		newAPIError = service.NormalizeViolationFeeError(newAPIError)
+		newAPIError = service.ObserveFailureThreshold(channelError, newAPIError)
 		newAPIError = service.ObserveTimeoutThreshold(channelError, newAPIError)
 		relayInfo.LastError = newAPIError
 
@@ -552,14 +601,25 @@ func RelayTask(c *gin.Context) {
 
 		result, taskErr = relay.RelayTaskSubmit(c, relayInfo)
 		if taskErr == nil {
+			service.ObserveFailureThreshold(
+				*types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey,
+					common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()),
+				nil,
+			)
 			break
 		}
 
 		if !taskErr.LocalError {
+			taskRelayErr := types.NewOpenAIError(taskErr.Error, types.ErrorCodeBadResponseStatusCode, taskErr.StatusCode)
+			taskRelayErr = service.ObserveFailureThreshold(
+				*types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey,
+					common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()),
+				taskRelayErr,
+			)
 			processChannelError(c,
 				*types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey,
 					common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()),
-				types.NewOpenAIError(taskErr.Error, types.ErrorCodeBadResponseStatusCode, taskErr.StatusCode))
+				taskRelayErr)
 		}
 
 		if !shouldRetryTaskRelay(c, channel.Id, taskErr, common.RetryTimes-retryParam.GetRetry()) {

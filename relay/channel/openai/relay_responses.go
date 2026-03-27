@@ -74,19 +74,35 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 		return nil, types.NewError(fmt.Errorf("invalid response"), types.ErrorCodeBadResponse)
 	}
 
+	// 针对 Codex 接口的上游错误拦截。如果上游返回了 HTML（比如 Cloudflare 502/503），
+	// 绝对不能进 Scanner 转发，否则客户端 SSE 解析会报 builder error 崩溃。
+	if resp.StatusCode != http.StatusOK {
+		contentType := resp.Header.Get("Content-Type")
+		if strings.Contains(contentType, "text/html") {
+			defer resp.Body.Close()
+			return nil, types.NewError(fmt.Errorf("upstream error (%d): received HTML instead of JSON stream", resp.StatusCode), types.ErrorCodeBadResponse)
+		}
+	}
+
 	defer service.CloseResponseBodyGracefully(resp)
 
 	var usage = &dto.Usage{}
 	var responseTextBuilder strings.Builder
+	var eventTypes []string
+	sawCompleted := false
 
 	helper.StreamScannerHandler(c, resp, info, func(data string) bool {
 
 		// 检查当前数据是否包含 completed 状态和 usage 信息
 		var streamResponse dto.ResponsesStreamResponse
 		if err := common.UnmarshalJsonStr(data, &streamResponse); err == nil {
+			if len(eventTypes) < 16 {
+				eventTypes = append(eventTypes, streamResponse.Type)
+			}
 			sendResponsesStreamData(c, streamResponse, data)
 			switch streamResponse.Type {
 			case "response.completed":
+				sawCompleted = true
 				if streamResponse.Response != nil {
 					if streamResponse.Response.Usage != nil {
 						if streamResponse.Response.Usage.InputTokens != 0 {
@@ -129,6 +145,13 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 		}
 		return true
 	})
+
+	logger.LogInfo(c, fmt.Sprintf(
+		"responses debug stream summary: completed=%v events=%s usage=%+v",
+		sawCompleted,
+		strings.Join(eventTypes, " -> "),
+		*usage,
+	))
 
 	if usage.CompletionTokens == 0 {
 		// 计算输出文本的 token 数量

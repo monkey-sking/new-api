@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
@@ -76,6 +77,84 @@ func ResponseChunkData(c *gin.Context, resp dto.ResponsesStreamResponse, data st
 	c.Render(-1, common.CustomEvent{Data: fmt.Sprintf("event: %s\n", resp.Type)})
 	c.Render(-1, common.CustomEvent{Data: fmt.Sprintf("data: %s", data)})
 	_ = FlushWriter(c)
+}
+
+func WriteResponsesErrorStream(c *gin.Context, openAIError types.OpenAIError, model string) error {
+	if c == nil || c.Writer == nil {
+		return errors.New("context or writer is nil")
+	}
+
+	SetEventStreamHeaders(c)
+	c.Status(http.StatusOK)
+
+	responseID := GetResponsesResponseID(c)
+	createdAt := common.GetTimestamp()
+	usage := dto.Usage{}
+
+	emit := func(event string, payload map[string]any) error {
+		jsonData, err := common.Marshal(payload)
+		if err != nil {
+			return err
+		}
+		c.Render(-1, common.CustomEvent{Data: fmt.Sprintf("event: %s\n", event)})
+		c.Render(-1, common.CustomEvent{Data: fmt.Sprintf("data: %s", string(jsonData))})
+		return FlushWriter(c)
+	}
+
+	buildResponse := func(status string, includeError bool) map[string]any {
+		response := map[string]any{
+			"id":         responseID,
+			"object":     "response",
+			"created_at": createdAt,
+			"status":     status,
+			"output":     []any{},
+			"usage":      usage,
+		}
+		if model != "" {
+			response["model"] = model
+		}
+		if includeError {
+			response["error"] = openAIError
+		}
+		return response
+	}
+
+	events := []struct {
+		name    string
+		payload map[string]any
+	}{
+		{
+			name: "response.created",
+			payload: map[string]any{
+				"type":            "response.created",
+				"sequence_number": 1,
+				"response":        buildResponse("in_progress", false),
+			},
+		},
+		{
+			name: "response.failed",
+			payload: map[string]any{
+				"type":            "response.failed",
+				"sequence_number": 2,
+				"response":        buildResponse("failed", true),
+			},
+		},
+		{
+			name: "response.completed",
+			payload: map[string]any{
+				"type":            "response.completed",
+				"sequence_number": 3,
+				"response":        buildResponse("failed", true),
+			},
+		},
+	}
+
+	for _, event := range events {
+		if err := emit(event.name, event.payload); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func StringData(c *gin.Context, str string) error {
@@ -158,6 +237,14 @@ func WssError(c *gin.Context, ws *websocket.Conn, openaiError types.OpenAIError)
 func GetResponseID(c *gin.Context) string {
 	logID := c.GetString(common.RequestIdKey)
 	return fmt.Sprintf("chatcmpl-%s", logID)
+}
+
+func GetResponsesResponseID(c *gin.Context) string {
+	logID := strings.TrimSpace(c.GetString(common.RequestIdKey))
+	if logID == "" {
+		logID = common.GetTimeString()
+	}
+	return fmt.Sprintf("resp_%s", logID)
 }
 
 func GetLocalRealtimeID(c *gin.Context) string {

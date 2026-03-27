@@ -29,6 +29,8 @@ type ModelRequest struct {
 
 func Distribute() func(c *gin.Context) {
 	return func(c *gin.Context) {
+		// DEBUG: Log all incoming requests regardless of state
+		common.SysLog(fmt.Sprintf("[DEBUG] Incoming Request: %s %s from %s", c.Request.Method, c.Request.URL.Path, c.ClientIP()))
 		var channel *model.Channel
 		channelId, ok := common.GetContextKey(c, constant.ContextKeyTokenSpecificChannelId)
 		modelRequest, shouldSelectChannel, err := getModelRequest(c)
@@ -36,6 +38,7 @@ func Distribute() func(c *gin.Context) {
 			abortWithOpenAiMessage(c, http.StatusBadRequest, i18n.T(c, i18n.MsgDistributorInvalidRequest, map[string]any{"Error": err.Error()}))
 			return
 		}
+		common.SysLog(fmt.Sprintf("[DEBUG] Requested model: %s", modelRequest.Model))
 		if ok {
 			id, err := strconv.Atoi(channelId.(string))
 			if err != nil {

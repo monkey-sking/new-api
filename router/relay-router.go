@@ -1,8 +1,10 @@
 package router
 
 import (
+	"fmt"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/controller"
+	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/relay"
 	"github.com/QuantumNous/new-api/types"
@@ -196,6 +198,24 @@ func SetRelayRouter(router *gin.Engine) {
 		// Gemini API 路径格式: /v1beta/models/{model_name}:{action}
 		relayGeminiRouter.POST("/models/*path", func(c *gin.Context) {
 			controller.Relay(c, types.RelayFormatGemini)
+		})
+	}
+
+	// Codex App Support (Direct backend-api requests)
+	backendRouter := router.Group("/backend-api/codex")
+	backendRouter.Use(middleware.RouteTag("relay"))
+	backendRouter.Use(middleware.SystemPerformanceCheck())
+	backendRouter.Use(func(c *gin.Context) {
+		logger.LogInfo(c, fmt.Sprintf("[HIT] Backend-API Request: %s %s", c.Request.Method, c.Request.URL.Path))
+		c.Next()
+	})
+	backendRouter.Use(middleware.TokenAuth(), middleware.Distribute())
+	{
+		backendRouter.POST("/responses", func(c *gin.Context) {
+			controller.Relay(c, types.RelayFormatOpenAIResponses)
+		})
+		backendRouter.POST("/responses/compact", func(c *gin.Context) {
+			controller.Relay(c, types.RelayFormatOpenAIResponsesCompaction)
 		})
 	}
 }
