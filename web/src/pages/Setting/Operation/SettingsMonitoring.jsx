@@ -207,7 +207,7 @@ export default function SettingsMonitoring(props) {
               <Col xs={24} sm={12} md={8} lg={8} xl={8}>
                 <Form.Switch
                   field={'AutomaticDisableChannelEnabled'}
-                  label={t('失败时自动禁用通道')}
+                  label={t('失败时自动降级通道，严重时自动禁用')}
                   size='default'
                   checkedText='｜'
                   uncheckedText='〇'

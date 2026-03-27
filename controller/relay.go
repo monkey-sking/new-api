@@ -277,6 +277,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		if newAPIError == nil {
 			service.ObserveFailureThreshold(channelError, nil)
 			service.ObserveTimeoutThreshold(channelError, nil)
+			service.ObserveChannelSoftDegrade(c, channelError, relayInfo.OriginModelName, nil)
 			relayInfo.LastError = nil
 			return
 		}
@@ -284,6 +285,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		newAPIError = service.NormalizeViolationFeeError(newAPIError)
 		newAPIError = service.ObserveFailureThreshold(channelError, newAPIError)
 		newAPIError = service.ObserveTimeoutThreshold(channelError, newAPIError)
+		service.ObserveChannelSoftDegrade(c, channelError, relayInfo.OriginModelName, newAPIError)
 		relayInfo.LastError = newAPIError
 
 		processChannelError(c, channelError, newAPIError)
@@ -601,24 +603,21 @@ func RelayTask(c *gin.Context) {
 
 		result, taskErr = relay.RelayTaskSubmit(c, relayInfo)
 		if taskErr == nil {
-			service.ObserveFailureThreshold(
-				*types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey,
-					common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()),
-				nil,
-			)
+			channelError := *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey,
+				common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan())
+			service.ObserveFailureThreshold(channelError, nil)
+			service.ObserveChannelSoftDegrade(c, channelError, relayInfo.OriginModelName, nil)
 			break
 		}
 
 		if !taskErr.LocalError {
 			taskRelayErr := types.NewOpenAIError(taskErr.Error, types.ErrorCodeBadResponseStatusCode, taskErr.StatusCode)
-			taskRelayErr = service.ObserveFailureThreshold(
-				*types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey,
-					common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()),
-				taskRelayErr,
-			)
+			channelError := *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey,
+				common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan())
+			taskRelayErr = service.ObserveFailureThreshold(channelError, taskRelayErr)
+			service.ObserveChannelSoftDegrade(c, channelError, relayInfo.OriginModelName, taskRelayErr)
 			processChannelError(c,
-				*types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey,
-					common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()),
+				channelError,
 				taskRelayErr)
 		}
 

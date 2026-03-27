@@ -48,6 +48,7 @@ func InitOptionMap() {
 	common.OptionMap["AutomaticDisableConsecutiveFailureCount"] = strconv.Itoa(common.AutomaticDisableConsecutiveFailureCount)
 	common.OptionMap["AutomaticDisableConsecutiveTimeoutCount"] = strconv.Itoa(common.AutomaticDisableConsecutiveTimeoutCount)
 	common.OptionMap["AutomaticDisableThresholdWindowSeconds"] = strconv.Itoa(common.AutomaticDisableThresholdWindowSeconds)
+	common.OptionMap["ChannelSoftDegradeWindowSeconds"] = strconv.Itoa(common.ChannelSoftDegradeWindowSeconds)
 	common.OptionMap["AutomaticEnableChannelEnabled"] = strconv.FormatBool(common.AutomaticEnableChannelEnabled)
 	common.OptionMap["LogConsumeEnabled"] = strconv.FormatBool(common.LogConsumeEnabled)
 	common.OptionMap["DisplayInCurrencyEnabled"] = strconv.FormatBool(common.DisplayInCurrencyEnabled)
@@ -370,6 +371,11 @@ func updateOptionMap(key string, value string) (err error) {
 		common.AutomaticDisableThresholdWindowSeconds, _ = strconv.Atoi(value)
 		if common.AutomaticDisableThresholdWindowSeconds <= 0 {
 			common.AutomaticDisableThresholdWindowSeconds = 300
+		}
+	case "ChannelSoftDegradeWindowSeconds":
+		common.ChannelSoftDegradeWindowSeconds, _ = strconv.Atoi(value)
+		if common.ChannelSoftDegradeWindowSeconds <= 0 {
+			common.ChannelSoftDegradeWindowSeconds = 86400
 		}
 	case "MinTopUp":
 		operation_setting.MinTopUp, _ = strconv.Atoi(value)

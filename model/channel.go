@@ -55,6 +55,19 @@ type Channel struct {
 
 	// cache info
 	Keys []string `json:"-" gorm:"-"`
+
+	RuntimeHealth *ChannelRuntimeHealth `json:"runtime_health,omitempty" gorm:"-"`
+}
+
+type ChannelRuntimeHealth struct {
+	Score            int    `json:"score"`
+	ActiveScopeCount int    `json:"active_scope_count"`
+	MaxPenalty       int    `json:"max_penalty"`
+	EffectivePenalty int    `json:"effective_penalty"`
+	WorstModel       string `json:"worst_model,omitempty"`
+	WorstPath        string `json:"worst_path,omitempty"`
+	WindowSeconds    int    `json:"window_seconds"`
+	Scope            string `json:"scope,omitempty"`
 }
 
 type ChannelInfo struct {

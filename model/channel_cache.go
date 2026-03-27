@@ -98,9 +98,13 @@ func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel,
 }
 
 func GetRandomSatisfiedChannelWithExcluded(group string, model string, retry int, excluded map[int]struct{}) (*Channel, error) {
+	return GetRandomSatisfiedChannelWithSelectionOptions(group, model, retry, excluded, nil)
+}
+
+func GetRandomSatisfiedChannelWithSelectionOptions(group string, model string, retry int, excluded map[int]struct{}, options *ChannelSelectOptions) (*Channel, error) {
 	// if memory cache is disabled, get channel directly from database
 	if !common.MemoryCacheEnabled {
-		return GetChannelWithExcluded(group, model, retry, excluded)
+		return getChannelWithExcludedUsingOptions(group, model, retry, excluded, options)
 	}
 
 	channelSyncLock.RLock()
@@ -113,6 +117,12 @@ func GetRandomSatisfiedChannelWithExcluded(group string, model string, retry int
 	if len(channels) == 0 {
 		normalizedModel := ratio_setting.FormatMatchingModelName(model)
 		channels = group2model2channels[group][normalizedModel]
+	}
+
+	// Responses compact requests can reuse the base model's OpenAI/Codex-compatible
+	// channels when no explicit compact ability has been configured.
+	if len(channels) == 0 {
+		channels = getResponsesCompactFallbackChannelIDs(group, model)
 	}
 
 	if len(channels) == 0 {
@@ -134,7 +144,7 @@ func GetRandomSatisfiedChannelWithExcluded(group string, model string, retry int
 	uniquePriorities := make(map[int]bool)
 	for _, channelId := range channels {
 		if channel, ok := channelsIDM[channelId]; ok {
-			uniquePriorities[int(channel.GetPriority())] = true
+			uniquePriorities[int(options.EffectivePriority(channelId, channel.GetPriority()))] = true
 		} else {
 			return nil, fmt.Errorf("数据库一致性错误，渠道# %d 不存在，请联系管理员修复", channelId)
 		}
@@ -163,7 +173,7 @@ func GetRandomSatisfiedChannelWithExcluded(group string, model string, retry int
 				}
 			}
 			if channel, ok := channelsIDM[channelId]; ok {
-				if channel.GetPriority() == targetPriority {
+				if options.EffectivePriority(channelId, channel.GetPriority()) == targetPriority {
 					sumWeight += channel.GetWeight()
 					targetChannels = append(targetChannels, channel)
 				}
@@ -202,6 +212,29 @@ func GetRandomSatisfiedChannelWithExcluded(group string, model string, retry int
 	}
 
 	return nil, errors.New("channel not found")
+}
+
+func getResponsesCompactFallbackChannelIDs(group string, model string) []int {
+	fallbackModels := responsesCompactFallbackModels(model)
+	if len(fallbackModels) == 0 {
+		return nil
+	}
+	filtered := make([]int, 0)
+	seen := make(map[int]struct{})
+	for _, fallbackModel := range fallbackModels {
+		for _, channelID := range group2model2channels[group][fallbackModel] {
+			if _, ok := seen[channelID]; ok {
+				continue
+			}
+			channel, ok := channelsIDM[channelID]
+			if !ok || !supportsResponsesCompactChannel(channel) {
+				continue
+			}
+			seen[channelID] = struct{}{}
+			filtered = append(filtered, channelID)
+		}
+	}
+	return filtered
 }
 
 func CacheGetChannel(id int) (*Channel, error) {

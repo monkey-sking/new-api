@@ -188,6 +188,75 @@ const renderStatus = (status, channelInfo = undefined, t) => {
   }
 };
 
+const normalizeRuntimeHealth = (runtimeHealth) => ({
+  score: 100,
+  active_scope_count: 0,
+  max_penalty: 0,
+  effective_penalty: 0,
+  worst_model: '',
+  worst_path: '',
+  window_seconds: 86400,
+  scope: 'local_node',
+  ...(runtimeHealth || {}),
+});
+
+const getRuntimeHealthColor = (score) => {
+  if (score >= 100) {
+    return 'green';
+  }
+  if (score >= 80) {
+    return 'lime';
+  }
+  if (score >= 60) {
+    return 'yellow';
+  }
+  if (score >= 40) {
+    return 'orange';
+  }
+  return 'red';
+};
+
+const renderRuntimeHealth = (runtimeHealth, t) => {
+  const health = normalizeRuntimeHealth(runtimeHealth);
+  const tooltipLines = [
+    t('当前节点的运行时健康值'),
+    `${t('健康值')}：${health.score}%`,
+    `${t('活跃降级作用域')}：${health.active_scope_count}`,
+    `${t('当前惩罚')}：${health.effective_penalty}`,
+    `${t('原始惩罚')}：${health.max_penalty}`,
+    `${t('统计窗口')}：${health.window_seconds}${t(' 秒')}`,
+    t('成功请求会逐步恢复，超出窗口的失败记录会自动过期。'),
+  ];
+
+  if (health.worst_model) {
+    tooltipLines.splice(
+      5,
+      0,
+      `${t('最差模型')}：${health.worst_model}`,
+      `${t('最差路径')}：${health.worst_path || '-'}`,
+    );
+  }
+
+  return (
+    <Tooltip
+      content={
+        <div className='flex flex-col gap-1 max-w-xs'>
+          {tooltipLines.map((line) => (
+            <Typography.Text key={line} size='small'>
+              {line}
+            </Typography.Text>
+          ))}
+        </div>
+      }
+      position='topLeft'
+    >
+      <Tag color={getRuntimeHealthColor(health.score)} shape='circle'>
+        {health.score}%
+      </Tag>
+    </Tooltip>
+  );
+};
+
 const renderMultiKeyStatus = (status, keySize, enabledKeySize, t) => {
   switch (status) {
     case 1:
@@ -514,6 +583,14 @@ export const getChannelsColumns = ({
         } else {
           return renderStatus(text, record.channel_info, t);
         }
+      },
+    },
+    {
+      key: COLUMN_KEYS.HEALTH,
+      title: t('健康'),
+      dataIndex: 'runtime_health',
+      render: (text, record, index) => {
+        return renderRuntimeHealth(record.runtime_health, t);
       },
     },
     {

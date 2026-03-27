@@ -40,6 +40,49 @@ import { parseUpstreamUpdateMeta } from './upstreamUpdateUtils';
 import { Modal, Button } from '@douyinfe/semi-ui';
 import { openCodexUsageModal } from '../../components/table/channels/modals/CodexUsageModal';
 
+const DEFAULT_CHANNEL_RUNTIME_HEALTH = {
+  score: 100,
+  active_scope_count: 0,
+  max_penalty: 0,
+  effective_penalty: 0,
+  worst_model: '',
+  worst_path: '',
+  window_seconds: 86400,
+  scope: 'local_node',
+};
+
+const normalizeRuntimeHealth = (runtimeHealth) => ({
+  ...DEFAULT_CHANNEL_RUNTIME_HEALTH,
+  ...(runtimeHealth || {}),
+});
+
+const mergeTagRuntimeHealth = (currentHealth, nextHealth) => {
+  const current = normalizeRuntimeHealth(currentHealth);
+  const next = normalizeRuntimeHealth(nextHealth);
+  const merged = {
+    ...current,
+    active_scope_count:
+      (current.active_scope_count || 0) + (next.active_scope_count || 0),
+    max_penalty: Math.max(current.max_penalty || 0, next.max_penalty || 0),
+    effective_penalty: Math.max(
+      current.effective_penalty || 0,
+      next.effective_penalty || 0,
+    ),
+    score: Math.min(current.score ?? 100, next.score ?? 100),
+    window_seconds: Math.max(
+      current.window_seconds || 0,
+      next.window_seconds || 0,
+    ),
+  };
+
+  if ((next.score ?? 100) <= (current.score ?? 100)) {
+    merged.worst_model = next.worst_model || current.worst_model || '';
+    merged.worst_path = next.worst_path || current.worst_path || '';
+  }
+
+  return merged;
+};
+
 export const useChannelsData = () => {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
@@ -136,6 +179,7 @@ export const useChannelsData = () => {
     GROUP: 'group',
     TYPE: 'type',
     STATUS: 'status',
+    HEALTH: 'health',
     RESPONSE_TIME: 'response_time',
     BALANCE: 'balance',
     PRIORITY: 'priority',
@@ -176,6 +220,7 @@ export const useChannelsData = () => {
       [COLUMN_KEYS.GROUP]: true,
       [COLUMN_KEYS.TYPE]: true,
       [COLUMN_KEYS.STATUS]: true,
+      [COLUMN_KEYS.HEALTH]: true,
       [COLUMN_KEYS.RESPONSE_TIME]: true,
       [COLUMN_KEYS.BALANCE]: true,
       [COLUMN_KEYS.PRIORITY]: true,
@@ -260,6 +305,7 @@ export const useChannelsData = () => {
             response_time: 0,
             priority: -1,
             weight: -1,
+            runtime_health: normalizeRuntimeHealth(),
           };
           tagChannelDates.children = [];
           channelDates.push(tagChannelDates);
@@ -295,6 +341,10 @@ export const useChannelsData = () => {
         }
 
         tagChannelDates.children.push(channels[i]);
+        tagChannelDates.runtime_health = mergeTagRuntimeHealth(
+          tagChannelDates.runtime_health,
+          channels[i].runtime_health,
+        );
         if (channels[i].status === 1) {
           tagChannelDates.status = 1;
         }

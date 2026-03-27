@@ -25,7 +25,12 @@ func IsChannelEnabledForGroupModel(group string, modelName string, channelID int
 	}
 	normalized := ratio_setting.FormatMatchingModelName(modelName)
 	if normalized != "" && normalized != modelName {
-		return isChannelIDInList(group2model2channels[group][normalized], channelID)
+		if isChannelIDInList(group2model2channels[group][normalized], channelID) {
+			return true
+		}
+	}
+	if isChannelIDInList(getResponsesCompactFallbackChannelIDs(group, modelName), channelID) {
+		return true
 	}
 	return false
 }
@@ -45,20 +50,44 @@ func IsChannelEnabledForAnyGroupModel(groups []string, modelName string, channel
 func isChannelEnabledForGroupModelDB(group string, modelName string, channelID int) bool {
 	var count int64
 	err := DB.Model(&Ability{}).
-		Where(commonGroupCol+" = ? and model = ? and channel_id = ? and enabled = ?", group, modelName, channelID, true).
+		Joins("left join channels on abilities.channel_id = channels.id").
+		Where("abilities."+commonGroupCol+" = ? and abilities.model = ? and abilities.channel_id = ? and abilities.enabled = ?", group, modelName, channelID, true).
+		Where("channels.status = ?", common.ChannelStatusEnabled).
 		Count(&count).Error
 	if err == nil && count > 0 {
 		return true
 	}
 	normalized := ratio_setting.FormatMatchingModelName(modelName)
-	if normalized == "" || normalized == modelName {
+	if normalized != "" && normalized != modelName {
+		count = 0
+		err = DB.Model(&Ability{}).
+			Joins("left join channels on abilities.channel_id = channels.id").
+			Where("abilities."+commonGroupCol+" = ? and abilities.model = ? and abilities.channel_id = ? and abilities.enabled = ?", group, normalized, channelID, true).
+			Where("channels.status = ?", common.ChannelStatusEnabled).
+			Count(&count).Error
+		if err == nil && count > 0 {
+			return true
+		}
+	}
+	fallbackModels := responsesCompactFallbackModels(modelName)
+	if len(fallbackModels) == 0 {
 		return false
 	}
-	count = 0
-	err = DB.Model(&Ability{}).
-		Where(commonGroupCol+" = ? and model = ? and channel_id = ? and enabled = ?", group, normalized, channelID, true).
-		Count(&count).Error
-	return err == nil && count > 0
+	var ability AbilityWithChannel
+	for _, fallbackModel := range fallbackModels {
+		err = DB.Table("abilities").
+			Select("abilities.*, channels.type as channel_type").
+			Joins("left join channels on abilities.channel_id = channels.id").
+			Where("abilities."+commonGroupCol+" = ? and abilities.model = ? and abilities.channel_id = ? and abilities.enabled = ?", group, fallbackModel, channelID, true).
+			Where("channels.status = ?", common.ChannelStatusEnabled).
+			Limit(1).
+			Scan(&ability).Error
+		if err == nil && ability.ChannelId > 0 && supportsResponsesCompactChannelType(ability.ChannelType) {
+			return true
+		}
+		ability = AbilityWithChannel{}
+	}
+	return false
 }
 
 func isChannelIDInList(list []int, channelID int) bool {

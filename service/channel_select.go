@@ -98,6 +98,7 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 	var err error
 	selectGroup := param.TokenGroup
 	userGroup := common.GetContextKeyString(param.Ctx, constant.ContextKeyUserGroup)
+	selectOptions := buildChannelSelectOptions(param)
 
 	if param.TokenGroup == "auto" {
 		if len(setting.GetAutoGroups()) == 0 {
@@ -128,7 +129,7 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 			}
 			logger.LogDebug(param.Ctx, "Auto selecting group: %s, priorityRetry: %d", autoGroup, priorityRetry)
 
-			channel, _ = model.GetRandomSatisfiedChannelWithExcluded(autoGroup, param.ModelName, priorityRetry, usedChannelIDsFromContext(param.Ctx))
+			channel, _ = model.GetRandomSatisfiedChannelWithSelectionOptions(autoGroup, param.ModelName, priorityRetry, usedChannelIDsFromContext(param.Ctx), selectOptions)
 			if channel == nil {
 				// Current group has no available channel for this model, try next group
 				// 当前分组没有该模型的可用渠道，尝试下一个分组
@@ -166,7 +167,7 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 			break
 		}
 	} else {
-		channel, err = model.GetRandomSatisfiedChannelWithExcluded(param.TokenGroup, param.ModelName, param.GetRetry(), usedChannelIDsFromContext(param.Ctx))
+		channel, err = model.GetRandomSatisfiedChannelWithSelectionOptions(param.TokenGroup, param.ModelName, param.GetRetry(), usedChannelIDsFromContext(param.Ctx), selectOptions)
 		if err != nil {
 			return nil, param.TokenGroup, err
 		}

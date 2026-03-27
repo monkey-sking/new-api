@@ -55,6 +55,7 @@ export default function GeneralSettings(props) {
     AutomaticDisableConsecutiveFailureCount: '',
     AutomaticDisableConsecutiveTimeoutCount: '',
     AutomaticDisableThresholdWindowSeconds: 300,
+    ChannelSoftDegradeWindowSeconds: 86400,
     USDExchangeRate: '',
     DisplayTokenStatEnabled: false,
     DefaultCollapseSidebar: false,
@@ -242,12 +243,22 @@ export default function GeneralSettings(props) {
               <Col xs={24} sm={12} md={8} lg={8} xl={8}>
                 <Form.Input
                   field={'AutomaticDisableThresholdWindowSeconds'}
-                  label={t('失败/超时统计窗口（秒）')}
+                  label={t('自动禁用统计窗口（秒）')}
                   initValue={300}
                   placeholder={t('默认 300 秒')}
                   onChange={handleFieldChange(
                     'AutomaticDisableThresholdWindowSeconds',
                   )}
+                  showClear
+                />
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.Input
+                  field={'ChannelSoftDegradeWindowSeconds'}
+                  label={t('健康值统计窗口（秒）')}
+                  initValue={86400}
+                  placeholder={t('默认 86400 秒（1 天）')}
+                  onChange={handleFieldChange('ChannelSoftDegradeWindowSeconds')}
                   showClear
                 />
               </Col>

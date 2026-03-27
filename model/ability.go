@@ -181,43 +181,109 @@ func GetChannel(group string, model string, retry int) (*Channel, error) {
 }
 
 func GetChannelWithExcluded(group string, model string, retry int, excluded map[int]struct{}) (*Channel, error) {
-	var abilities []Ability
+	return getChannelWithExcludedUsingOptions(group, model, retry, excluded, nil)
+}
 
-	var err error = nil
-	channelQuery, err := getChannelQueryWithExcluded(group, model, retry, excluded)
+func getChannelWithExcludedUsingOptions(group string, model string, retry int, excluded map[int]struct{}, options *ChannelSelectOptions) (*Channel, error) {
+	abilities, err := loadSatisfiedAbilityRows(group, model, excluded)
 	if err != nil {
 		return nil, err
 	}
-	if common.UsingSQLite || common.UsingPostgreSQL {
-		err = channelQuery.Order("abilities.weight DESC").Find(&abilities).Error
-	} else {
-		err = channelQuery.Order("abilities.weight DESC").Find(&abilities).Error
-	}
-	if err != nil {
-		return nil, err
-	}
-	channel := Channel{}
-	if len(abilities) > 0 {
-		// Randomly choose one
-		weightSum := uint(0)
-		for _, ability_ := range abilities {
-			weightSum += ability_.Weight + 10
-		}
-		// Randomly choose one
-		weight := common.GetRandomInt(int(weightSum))
-		for _, ability_ := range abilities {
-			weight -= int(ability_.Weight) + 10
-			//log.Printf("weight: %d, ability weight: %d", weight, *ability_.Weight)
-			if weight <= 0 {
-				channel.Id = ability_.ChannelId
+
+	channelID, found := selectChannelIDFromAbilityRows(abilities, retry, options)
+	if !found {
+		for _, fallbackModel := range responsesCompactFallbackModels(model) {
+			fallbackAbilities, fallbackErr := loadSatisfiedAbilityRows(group, fallbackModel, excluded)
+			if fallbackErr != nil {
+				return nil, fallbackErr
+			}
+			channelID, found = selectChannelIDFromAbilityRows(filterResponsesCompactCompatibleAbilities(fallbackAbilities), retry, options)
+			if found {
 				break
 			}
 		}
-	} else {
+	}
+	if !found {
 		return nil, nil
 	}
+	channel := Channel{Id: channelID}
 	err = DB.First(&channel, "id = ?", channel.Id).Error
 	return &channel, err
+}
+
+func loadSatisfiedAbilityRows(group string, model string, excluded map[int]struct{}) ([]AbilityWithChannel, error) {
+	query := DB.Table("abilities").
+		Select("abilities.*, channels.type as channel_type").
+		Joins("left join channels on abilities.channel_id = channels.id").
+		Where("abilities."+commonGroupCol+" = ? and abilities.model = ? and abilities.enabled = ?", group, model, true).
+		Where("channels.status = ?", common.ChannelStatusEnabled)
+	if excluded != nil && len(excluded) > 0 {
+		excludedIDs := make([]int, 0, len(excluded))
+		for id := range excluded {
+			excludedIDs = append(excludedIDs, id)
+		}
+		query = query.Where("abilities.channel_id NOT IN ?", excludedIDs)
+	}
+	var abilities []AbilityWithChannel
+	err := query.Order("abilities.priority DESC, abilities.weight DESC, abilities.channel_id ASC").Scan(&abilities).Error
+	return abilities, err
+}
+
+func filterResponsesCompactCompatibleAbilities(abilities []AbilityWithChannel) []AbilityWithChannel {
+	filtered := make([]AbilityWithChannel, 0, len(abilities))
+	for _, ability := range abilities {
+		if supportsResponsesCompactChannelType(ability.ChannelType) {
+			filtered = append(filtered, ability)
+		}
+	}
+	return filtered
+}
+
+func selectChannelIDFromAbilityRows(abilities []AbilityWithChannel, retry int, options *ChannelSelectOptions) (int, bool) {
+	if len(abilities) == 0 {
+		return 0, false
+	}
+
+	priorities := make([]int64, 0)
+	priorityBuckets := make(map[int64][]AbilityWithChannel)
+	for _, ability := range abilities {
+		priority := int64(0)
+		if ability.Priority != nil {
+			priority = *ability.Priority
+		}
+		priority = options.EffectivePriority(ability.ChannelId, priority)
+		if _, ok := priorityBuckets[priority]; !ok {
+			priorities = append(priorities, priority)
+		}
+		priorityBuckets[priority] = append(priorityBuckets[priority], ability)
+	}
+
+	priorityRetryIndex := PriorityRetryIndex(retry)
+	if priorityRetryIndex >= len(priorities) {
+		priorityRetryIndex = len(priorities) - 1
+	}
+
+	for idx := priorityRetryIndex; idx < len(priorities); idx++ {
+		targetAbilities := priorityBuckets[priorities[idx]]
+		if len(targetAbilities) == 0 {
+			continue
+		}
+
+		weightSum := uint(0)
+		for _, ability := range targetAbilities {
+			weightSum += ability.Weight + 10
+		}
+
+		weight := common.GetRandomInt(int(weightSum))
+		for _, ability := range targetAbilities {
+			weight -= int(ability.Weight) + 10
+			if weight < 0 {
+				return ability.ChannelId, true
+			}
+		}
+	}
+
+	return 0, false
 }
 
 func (channel *Channel) AddAbilities(tx *gorm.DB) error {

@@ -68,6 +68,13 @@ func clearChannelInfo(channel *model.Channel) {
 	}
 }
 
+func enrichChannelRuntimeHealth(channels []*model.Channel) {
+	if len(channels) == 0 {
+		return
+	}
+	service.PopulateChannelRuntimeHealth(channels)
+}
+
 func GetAllChannels(c *gin.Context) {
 	pageInfo := common.GetPageQuery(c)
 	channelData := make([]*model.Channel, 0)
@@ -147,6 +154,7 @@ func GetAllChannels(c *gin.Context) {
 	for _, datum := range channelData {
 		clearChannelInfo(datum)
 	}
+	enrichChannelRuntimeHealth(channelData)
 
 	countQuery := model.DB.Model(&model.Channel{})
 	if statusFilter == common.ChannelStatusEnabled {
@@ -345,6 +353,7 @@ func SearchChannels(c *gin.Context) {
 	for _, datum := range pagedData {
 		clearChannelInfo(datum)
 	}
+	enrichChannelRuntimeHealth(pagedData)
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
