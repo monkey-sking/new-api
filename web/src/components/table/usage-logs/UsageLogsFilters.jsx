@@ -32,6 +32,10 @@ const LogsFilters = ({
   setLogType,
   loading,
   isAdminUser,
+  tokenNameOptions,
+  tokenNameOptionsLoading,
+  fetchTokenNameOptions,
+  handleTokenNameSearch,
   t,
 }) => {
   return (
@@ -66,10 +70,16 @@ const LogsFilters = ({
           </div>
 
           {/* 其他搜索字段 */}
-          <Form.Input
+          <Form.AutoComplete
             field='token_name'
             prefix={<IconSearch />}
             placeholder={t('令牌名称')}
+            data={tokenNameOptions}
+            loading={tokenNameOptionsLoading}
+            onSearch={handleTokenNameSearch}
+            onFocus={() => {
+              fetchTokenNameOptions('', { silent: true }).catch(() => {});
+            }}
             showClear
             pure
             size='small'

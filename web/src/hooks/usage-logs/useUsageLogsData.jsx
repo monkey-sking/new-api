@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Modal } from '@douyinfe/semi-ui';
 import {
@@ -72,6 +72,9 @@ export const useLogsData = () => {
   const [logCount, setLogCount] = useState(0);
   const [pageSize, setPageSize] = useState(ITEMS_PER_PAGE);
   const [logType, setLogType] = useState(0);
+  const [tokenNameOptions, setTokenNameOptions] = useState([]);
+  const [tokenNameOptionsLoading, setTokenNameOptionsLoading] = useState(false);
+  const tokenNameSearchTimerRef = useRef(null);
 
   // User and admin
   const isAdminUser = isAdmin();
@@ -257,6 +260,45 @@ export const useLogsData = () => {
       request_id: formValues.request_id || '',
       logType: formValues.logType ? parseInt(formValues.logType) : 0,
     };
+  };
+
+  const fetchTokenNameOptions = async (
+    keyword = '',
+    { silent = false } = {},
+  ) => {
+    setTokenNameOptionsLoading(true);
+    const basePath = isAdminUser
+      ? '/api/log/token_names'
+      : '/api/log/self/token_names';
+    const url = `${basePath}?keyword=${encodeURIComponent(keyword.trim())}&size=20`;
+    try {
+      const res = await API.get(url);
+      const { success, message, data } = res.data;
+      if (success) {
+        const items = Array.isArray(data?.items) ? data.items : [];
+        setTokenNameOptions(
+          items
+            .filter(Boolean)
+            .map((item) => ({
+              value: item,
+              label: item,
+            })),
+        );
+      } else if (!silent) {
+        showError(message);
+      }
+    } finally {
+      setTokenNameOptionsLoading(false);
+    }
+  };
+
+  const handleTokenNameSearch = (keyword = '') => {
+    if (tokenNameSearchTimerRef.current) {
+      clearTimeout(tokenNameSearchTimerRef.current);
+    }
+    tokenNameSearchTimerRef.current = setTimeout(() => {
+      fetchTokenNameOptions(keyword, { silent: true }).catch(() => {});
+    }, 200);
   };
 
   // Statistics functions
@@ -783,6 +825,18 @@ export const useLogsData = () => {
       });
   }, []);
 
+  useEffect(() => {
+    fetchTokenNameOptions('', { silent: true }).catch(() => {});
+  }, [isAdminUser]);
+
+  useEffect(() => {
+    return () => {
+      if (tokenNameSearchTimerRef.current) {
+        clearTimeout(tokenNameSearchTimerRef.current);
+      }
+    };
+  }, []);
+
   // Initialize statistics when formApi is available
   useEffect(() => {
     if (formApi) {
@@ -816,6 +870,10 @@ export const useLogsData = () => {
     setFormApi,
     formInitValues,
     getFormValues,
+    tokenNameOptions,
+    tokenNameOptionsLoading,
+    fetchTokenNameOptions,
+    handleTokenNameSearch,
 
     // Column visibility
     visibleColumns,

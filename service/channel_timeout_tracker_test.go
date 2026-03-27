@@ -3,6 +3,7 @@ package service
 import (
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/types"
@@ -13,13 +14,20 @@ func TestObserveTimeoutThreshold(t *testing.T) {
 	t.Cleanup(func() {
 		common.AutomaticDisableChannelEnabled = false
 		common.AutomaticDisableConsecutiveTimeoutCount = 0
+		common.AutomaticDisableThresholdWindowSeconds = 300
+		nowFunc = time.Now
 		channelTimeoutTracker.Lock()
-		channelTimeoutTracker.counts = map[string]int{}
+		channelTimeoutTracker.events = map[string][]time.Time{}
 		channelTimeoutTracker.Unlock()
 	})
 
 	common.AutomaticDisableChannelEnabled = true
 	common.AutomaticDisableConsecutiveTimeoutCount = 2
+	common.AutomaticDisableThresholdWindowSeconds = 60
+	currentTime := time.Unix(1_700_000_000, 0)
+	nowFunc = func() time.Time {
+		return currentTime
+	}
 
 	channelError := types.ChannelError{
 		ChannelId:   7,
@@ -36,23 +44,31 @@ func TestObserveTimeoutThreshold(t *testing.T) {
 	first := ObserveTimeoutThreshold(channelError, timeoutErr)
 	require.Equal(t, timeoutErr, first)
 
+	currentTime = currentTime.Add(30 * time.Second)
 	second := ObserveTimeoutThreshold(channelError, timeoutErr)
 	require.NotNil(t, second)
 	require.Equal(t, types.ErrorCodeChannelTimeoutThresholdExceeded, second.GetErrorCode())
 	require.Equal(t, http.StatusRequestTimeout, second.StatusCode)
 }
 
-func TestObserveTimeoutThresholdResetsOnSuccessAndNonTimeout(t *testing.T) {
+func TestObserveTimeoutThresholdKeepsWindowAcrossSuccessAndNonTimeout(t *testing.T) {
 	t.Cleanup(func() {
 		common.AutomaticDisableChannelEnabled = false
 		common.AutomaticDisableConsecutiveTimeoutCount = 0
+		common.AutomaticDisableThresholdWindowSeconds = 300
+		nowFunc = time.Now
 		channelTimeoutTracker.Lock()
-		channelTimeoutTracker.counts = map[string]int{}
+		channelTimeoutTracker.events = map[string][]time.Time{}
 		channelTimeoutTracker.Unlock()
 	})
 
 	common.AutomaticDisableChannelEnabled = true
 	common.AutomaticDisableConsecutiveTimeoutCount = 2
+	common.AutomaticDisableThresholdWindowSeconds = 60
+	currentTime := time.Unix(1_700_000_100, 0)
+	nowFunc = func() time.Time {
+		return currentTime
+	}
 
 	channelError := types.ChannelError{
 		ChannelId:   9,
@@ -72,12 +88,15 @@ func TestObserveTimeoutThresholdResetsOnSuccessAndNonTimeout(t *testing.T) {
 	)
 
 	ObserveTimeoutThreshold(channelError, timeoutErr)
-	ObserveTimeoutThreshold(channelError, nil)
-
-	firstAfterReset := ObserveTimeoutThreshold(channelError, timeoutErr)
-	require.Equal(t, timeoutErr, firstAfterReset)
-
 	ObserveTimeoutThreshold(channelError, nonTimeoutErr)
-	firstAfterNonTimeoutReset := ObserveTimeoutThreshold(channelError, timeoutErr)
-	require.Equal(t, timeoutErr, firstAfterNonTimeoutReset)
+	currentTime = currentTime.Add(20 * time.Second)
+	ObserveTimeoutThreshold(channelError, nil)
+	currentTime = currentTime.Add(20 * time.Second)
+
+	second := ObserveTimeoutThreshold(channelError, timeoutErr)
+	require.NotNil(t, second)
+	require.Equal(t, types.ErrorCodeChannelTimeoutThresholdExceeded, second.GetErrorCode())
+
+	currentTime = currentTime.Add(61 * time.Second)
+	require.Equal(t, timeoutErr, ObserveTimeoutThreshold(channelError, timeoutErr))
 }

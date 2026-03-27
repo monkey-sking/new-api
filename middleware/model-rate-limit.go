@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/common/limiter"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting"
 
 	"github.com/gin-gonic/gin"
@@ -20,6 +21,20 @@ const (
 	ModelRequestRateLimitCountMark        = "MRRL"
 	ModelRequestRateLimitSuccessCountMark = "MRRLS"
 )
+
+func shouldBypassModelRequestRateLimit(c *gin.Context) bool {
+	if roleValue, ok := c.Get("role"); ok {
+		if role, ok := roleValue.(int); ok {
+			return role >= common.RoleAdminUser
+		}
+	}
+
+	userID := c.GetInt("id")
+	if userID == 0 {
+		return false
+	}
+	return model.IsAdmin(userID)
+}
 
 // 检查Redis中的请求限制
 func checkRedisRateLimit(ctx context.Context, rdb *redis.Client, key string, maxCount int, duration int64) (bool, error) {
@@ -168,6 +183,10 @@ func ModelRequestRateLimit() func(c *gin.Context) {
 	return func(c *gin.Context) {
 		// 在每个请求时检查是否启用限流
 		if !setting.ModelRequestRateLimitEnabled {
+			c.Next()
+			return
+		}
+		if shouldBypassModelRequestRateLimit(c) {
 			c.Next()
 			return
 		}

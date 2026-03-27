@@ -52,7 +52,9 @@ export default function GeneralSettings(props) {
     QuotaPerUnit: '',
     RetryTimes: '',
     SamePriorityRetryTimes: '',
+    AutomaticDisableConsecutiveFailureCount: '',
     AutomaticDisableConsecutiveTimeoutCount: '',
+    AutomaticDisableThresholdWindowSeconds: 300,
     USDExchangeRate: '',
     DisplayTokenStatEnabled: false,
     DefaultCollapseSidebar: false,
@@ -215,12 +217,36 @@ export default function GeneralSettings(props) {
               </Col>
               <Col xs={24} sm={12} md={8} lg={8} xl={8}>
                 <Form.Input
+                  field={'AutomaticDisableConsecutiveFailureCount'}
+                  label={t('窗口内失败禁用阈值')}
+                  initValue={''}
+                  placeholder={t('0 表示关闭')}
+                  onChange={handleFieldChange(
+                    'AutomaticDisableConsecutiveFailureCount',
+                  )}
+                  showClear
+                />
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.Input
                   field={'AutomaticDisableConsecutiveTimeoutCount'}
-                  label={t('连续超时禁用阈值')}
+                  label={t('窗口内超时禁用阈值')}
                   initValue={''}
                   placeholder={t('0 表示关闭')}
                   onChange={handleFieldChange(
                     'AutomaticDisableConsecutiveTimeoutCount',
+                  )}
+                  showClear
+                />
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.Input
+                  field={'AutomaticDisableThresholdWindowSeconds'}
+                  label={t('失败/超时统计窗口（秒）')}
+                  initValue={300}
+                  placeholder={t('默认 300 秒')}
+                  onChange={handleFieldChange(
+                    'AutomaticDisableThresholdWindowSeconds',
                   )}
                   showClear
                 />

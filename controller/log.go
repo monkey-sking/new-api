@@ -10,6 +10,11 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+func getTokenNameOptionsLimit(c *gin.Context) int {
+	pageInfo := common.GetPageQuery(c)
+	return pageInfo.GetPageSize()
+}
+
 func GetAllLogs(c *gin.Context) {
 	pageInfo := common.GetPageQuery(c)
 	logType, _ := strconv.Atoi(c.Query("type"))
@@ -51,6 +56,28 @@ func GetUserLogs(c *gin.Context) {
 	pageInfo.SetItems(logs)
 	common.ApiSuccess(c, pageInfo)
 	return
+}
+
+func GetLogTokenNames(c *gin.Context) {
+	tokenNames, err := model.GetLogTokenNames(0, true, c.Query("keyword"), getTokenNameOptionsLimit(c))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, gin.H{
+		"items": tokenNames,
+	})
+}
+
+func GetUserLogTokenNames(c *gin.Context) {
+	tokenNames, err := model.GetLogTokenNames(c.GetInt("id"), false, c.Query("keyword"), getTokenNameOptionsLimit(c))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, gin.H{
+		"items": tokenNames,
+	})
 }
 
 // Deprecated: SearchAllLogs 已废弃，前端未使用该接口。

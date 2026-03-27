@@ -58,6 +58,7 @@ const (
 	ErrorCodeChannelModelMappedError         ErrorCode = "channel:model_mapped_error"
 	ErrorCodeChannelAwsClientError           ErrorCode = "channel:aws_client_error"
 	ErrorCodeChannelInvalidKey               ErrorCode = "channel:invalid_key"
+	ErrorCodeChannelFailureThresholdExceeded ErrorCode = "channel:failure_threshold_exceeded"
 	ErrorCodeChannelResponseTimeExceeded     ErrorCode = "channel:response_time_exceeded"
 	ErrorCodeChannelTimeoutThresholdExceeded ErrorCode = "channel:timeout_threshold_exceeded"
 

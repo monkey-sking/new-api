@@ -129,6 +129,40 @@ const MODEL_FETCHABLE_TYPES = new Set([
   1, 4, 14, 34, 17, 26, 27, 24, 47, 25, 20, 23, 31, 40, 42, 48, 43,
 ]);
 
+function normalizeChannelModels(models) {
+  return Array.from(
+    new Set((models || []).map((model) => (model || '').trim()).filter(Boolean)),
+  );
+}
+
+function getChannelTypeLabel(type) {
+  return CHANNEL_OPTIONS.find((option) => option.value === type)?.label || 'Channel';
+}
+
+function deriveChannelNameFromInputs(localInputs) {
+  const existingName = String(localInputs?.name || '').trim();
+  if (existingName) {
+    return existingName;
+  }
+
+  const rawBaseUrl = String(localInputs?.base_url || '').trim();
+  if (rawBaseUrl) {
+    try {
+      const parsedUrl = rawBaseUrl.startsWith('http://') || rawBaseUrl.startsWith('https://')
+        ? new URL(rawBaseUrl)
+        : new URL(`https://${rawBaseUrl}`);
+      const host = (parsedUrl.host || parsedUrl.pathname || '').trim();
+      if (host) {
+        return host;
+      }
+    } catch (error) {
+      // ignore parse error and fall back to channel type label
+    }
+  }
+
+  return getChannelTypeLabel(localInputs?.type);
+}
+
 function type2secretPrompt(type) {
   // inputs.type === 15 ? '按照如下格式输入：APIKey|SecretKey' : (inputs.type === 18 ? '按照如下格式输入：APPID|APISecret|APIKey' : '请输入渠道对应的鉴权密钥')
   switch (type) {
@@ -1000,6 +1034,8 @@ const EditChannelModal = (props) => {
 
   const fetchUpstreamModelList = async (name, options = {}) => {
     const silent = !!options.silent;
+    const draftChannel = options.draftChannel || null;
+    const sourceInputs = draftChannel || inputs;
     // if (inputs['type'] !== 1) {
     //   showError(t('仅支持 OpenAI 接口格式'));
     //   return;
@@ -1020,17 +1056,19 @@ const EditChannelModal = (props) => {
       }
     } else {
       // 如果是新建模式，通过后端代理获取模型列表
-      if (!inputs?.['key']) {
-        showError(t('请填写密钥'));
+      if (!sourceInputs?.key) {
+        if (!silent) {
+          showError(t('请填写密钥'));
+        }
         err = true;
       } else {
         try {
           const res = await API.post(
             '/api/channel/fetch_models',
             {
-              base_url: inputs['base_url'],
-              type: inputs['type'],
-              key: inputs['key'],
+              base_url: sourceInputs.base_url,
+              type: sourceInputs.type,
+              key: sourceInputs.key,
             },
             { skipErrorHandler: true },
           );
@@ -1056,10 +1094,72 @@ const EditChannelModal = (props) => {
       setLoading(false);
       return uniqueModels;
     } else {
-      showError(t('获取模型列表失败'));
+      if (!silent) {
+        showError(t('获取模型列表失败'));
+      }
     }
     setLoading(false);
     return null;
+  };
+
+  const ensureChannelDefaultsBeforeSubmit = async (localInputs) => {
+    if (isEdit) {
+      return localInputs;
+    }
+
+    const nextInputs = { ...localInputs };
+
+    if (!String(nextInputs.name || '').trim()) {
+      const autoName = deriveChannelNameFromInputs(nextInputs);
+      if (autoName) {
+        nextInputs.name = autoName;
+        handleInputChange('name', autoName);
+      }
+    }
+
+    const normalizedModels = normalizeChannelModels(nextInputs.models);
+    if (normalizedModels.length > 0) {
+      nextInputs.models = normalizedModels;
+      return nextInputs;
+    }
+
+    const defaultModels = normalizeChannelModels(getChannelModels(nextInputs.type));
+    if (defaultModels.length > 0) {
+      nextInputs.models = defaultModels;
+      handleInputChange('models', defaultModels);
+      return nextInputs;
+    }
+
+    if (MODEL_FETCHABLE_TYPES.has(nextInputs.type) && String(nextInputs.key || '').trim()) {
+      const fetchedModels = await fetchUpstreamModelList('models', {
+        silent: true,
+        draftChannel: nextInputs,
+      });
+      const normalizedFetchedModels = normalizeChannelModels(fetchedModels);
+      if (normalizedFetchedModels.length > 0) {
+        nextInputs.models = normalizedFetchedModels;
+        handleInputChange('models', normalizedFetchedModels);
+      }
+    }
+
+    return nextInputs;
+  };
+
+  const handleSubmitClick = async () => {
+    if (!formApiRef.current) {
+      return;
+    }
+
+    if (!isEdit) {
+      const preparedInputs = await ensureChannelDefaultsBeforeSubmit(
+        formApiRef.current.getValues(),
+      );
+      Object.entries(preparedInputs).forEach(([key, value]) => {
+        formApiRef.current.setValue(key, value);
+      });
+    }
+
+    formApiRef.current.submitForm();
   };
 
   const openModelMappingValueModal = async ({ pairKey, value }) => {
@@ -1481,6 +1581,7 @@ const EditChannelModal = (props) => {
     const formValues = formApiRef.current ? formApiRef.current.getValues() : {};
     let localInputs = { ...formValues };
     localInputs.param_override = inputs.param_override;
+    localInputs = await ensureChannelDefaultsBeforeSubmit(localInputs);
 
     if (localInputs.type === 57) {
       if (batch) {
@@ -1619,9 +1720,7 @@ const EditChannelModal = (props) => {
       }
     }
 
-    const normalizedModels = (localInputs.models || [])
-      .map((model) => (model || '').trim())
-      .filter(Boolean);
+    const normalizedModels = normalizeChannelModels(localInputs.models);
     localInputs.models = normalizedModels;
 
     if (
@@ -2140,7 +2239,7 @@ const EditChannelModal = (props) => {
             <Space>
               <Button
                 theme='solid'
-                onClick={() => formApiRef.current?.submitForm()}
+                onClick={handleSubmitClick}
                 icon={<IconSave />}
               >
                 {t('提交')}

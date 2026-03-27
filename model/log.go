@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -371,6 +372,39 @@ func GetUserLogs(userId int, logType int, startTimestamp int64, endTimestamp int
 
 	formatUserLogs(logs, startIdx)
 	return logs, total, err
+}
+
+func escapeLogTokenNameKeyword(keyword string) string {
+	keyword = strings.TrimSpace(keyword)
+	keyword = strings.ReplaceAll(keyword, "!", "!!")
+	keyword = strings.ReplaceAll(keyword, "%", "!%")
+	keyword = strings.ReplaceAll(keyword, "_", "!_")
+	return keyword
+}
+
+func GetLogTokenNames(userId int, isAdmin bool, keyword string, limit int) ([]string, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	tx := LOG_DB.Model(&Log{}).
+		Distinct("token_name").
+		Where("token_name <> ?", "")
+
+	if !isAdmin {
+		tx = tx.Where("user_id = ?", userId)
+	}
+
+	if keyword = escapeLogTokenNameKeyword(keyword); keyword != "" {
+		tx = tx.Where("token_name LIKE ? ESCAPE '!'", "%"+keyword+"%")
+	}
+
+	var tokenNames []string
+	err := tx.Order("token_name ASC").Limit(limit).Pluck("token_name", &tokenNames).Error
+	return tokenNames, err
 }
 
 type Stat struct {

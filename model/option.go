@@ -45,7 +45,9 @@ func InitOptionMap() {
 	common.OptionMap["TurnstileCheckEnabled"] = strconv.FormatBool(common.TurnstileCheckEnabled)
 	common.OptionMap["RegisterEnabled"] = strconv.FormatBool(common.RegisterEnabled)
 	common.OptionMap["AutomaticDisableChannelEnabled"] = strconv.FormatBool(common.AutomaticDisableChannelEnabled)
+	common.OptionMap["AutomaticDisableConsecutiveFailureCount"] = strconv.Itoa(common.AutomaticDisableConsecutiveFailureCount)
 	common.OptionMap["AutomaticDisableConsecutiveTimeoutCount"] = strconv.Itoa(common.AutomaticDisableConsecutiveTimeoutCount)
+	common.OptionMap["AutomaticDisableThresholdWindowSeconds"] = strconv.Itoa(common.AutomaticDisableThresholdWindowSeconds)
 	common.OptionMap["AutomaticEnableChannelEnabled"] = strconv.FormatBool(common.AutomaticEnableChannelEnabled)
 	common.OptionMap["LogConsumeEnabled"] = strconv.FormatBool(common.LogConsumeEnabled)
 	common.OptionMap["DisplayInCurrencyEnabled"] = strconv.FormatBool(common.DisplayInCurrencyEnabled)
@@ -358,6 +360,16 @@ func updateOptionMap(key string, value string) (err error) {
 		common.AutomaticDisableConsecutiveTimeoutCount, _ = strconv.Atoi(value)
 		if common.AutomaticDisableConsecutiveTimeoutCount < 0 {
 			common.AutomaticDisableConsecutiveTimeoutCount = 0
+		}
+	case "AutomaticDisableConsecutiveFailureCount":
+		common.AutomaticDisableConsecutiveFailureCount, _ = strconv.Atoi(value)
+		if common.AutomaticDisableConsecutiveFailureCount < 0 {
+			common.AutomaticDisableConsecutiveFailureCount = 0
+		}
+	case "AutomaticDisableThresholdWindowSeconds":
+		common.AutomaticDisableThresholdWindowSeconds, _ = strconv.Atoi(value)
+		if common.AutomaticDisableThresholdWindowSeconds <= 0 {
+			common.AutomaticDisableThresholdWindowSeconds = 300
 		}
 	case "MinTopUp":
 		operation_setting.MinTopUp, _ = strconv.Atoi(value)

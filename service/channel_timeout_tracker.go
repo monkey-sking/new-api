@@ -4,18 +4,12 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"sync"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/types"
 )
 
-var channelTimeoutTracker = struct {
-	sync.Mutex
-	counts map[string]int
-}{
-	counts: map[string]int{},
-}
+var channelTimeoutTracker = newChannelWindowTracker()
 
 func channelTimeoutTrackerKey(channelError types.ChannelError) string {
 	if channelError.UsingKey != "" {
@@ -50,16 +44,19 @@ func isTimeoutLikeError(err *types.NewAPIError) bool {
 	return false
 }
 
-func resetChannelTimeoutCount(channelError types.ChannelError) {
+func clearChannelTimeoutWindow(channelError types.ChannelError) {
 	key := channelTimeoutTrackerKey(channelError)
-	channelTimeoutTracker.Lock()
-	delete(channelTimeoutTracker.counts, key)
-	channelTimeoutTracker.Unlock()
+	channelTimeoutTracker.clear(key)
+}
+
+func pruneChannelTimeoutWindow(channelError types.ChannelError) {
+	key := channelTimeoutTrackerKey(channelError)
+	channelTimeoutTracker.prune(key, channelDisableThresholdWindow())
 }
 
 func ObserveTimeoutThreshold(channelError types.ChannelError, err *types.NewAPIError) *types.NewAPIError {
 	if err == nil {
-		resetChannelTimeoutCount(channelError)
+		pruneChannelTimeoutWindow(channelError)
 		return nil
 	}
 
@@ -67,26 +64,25 @@ func ObserveTimeoutThreshold(channelError types.ChannelError, err *types.NewAPIE
 		return err
 	}
 
+	if ShouldDisableChannel(channelError.ChannelType, err) {
+		clearChannelTimeoutWindow(channelError)
+		return err
+	}
+
 	if !isTimeoutLikeError(err) {
-		resetChannelTimeoutCount(channelError)
+		pruneChannelTimeoutWindow(channelError)
 		return err
 	}
 
 	key := channelTimeoutTrackerKey(channelError)
-
-	channelTimeoutTracker.Lock()
-	channelTimeoutTracker.counts[key]++
-	count := channelTimeoutTracker.counts[key]
-	if count >= common.AutomaticDisableConsecutiveTimeoutCount {
-		delete(channelTimeoutTracker.counts, key)
-	}
-	channelTimeoutTracker.Unlock()
+	count := channelTimeoutTracker.observe(key, channelDisableThresholdWindow())
 
 	if count < common.AutomaticDisableConsecutiveTimeoutCount {
 		return err
 	}
 
-	reason := fmt.Sprintf("channel timed out %d consecutive times", count)
+	channelTimeoutTracker.clear(key)
+	reason := fmt.Sprintf("channel timed out %d times within the configured window", count)
 	return types.NewOpenAIError(
 		fmt.Errorf("%s", reason),
 		types.ErrorCodeChannelTimeoutThresholdExceeded,
