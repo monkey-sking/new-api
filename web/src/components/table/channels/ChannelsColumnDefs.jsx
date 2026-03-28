@@ -200,6 +200,14 @@ const normalizeRuntimeHealth = (runtimeHealth) => ({
   ...(runtimeHealth || {}),
 });
 
+const normalizeBalanceCheck = (balanceCheck) => ({
+  status: 'unchecked',
+  checked_at: 0,
+  trigger: '',
+  reason: '',
+  ...(balanceCheck || {}),
+});
+
 const getRuntimeHealthColor = (score) => {
   if (score >= 100) {
     return 'green';
@@ -252,6 +260,90 @@ const renderRuntimeHealth = (runtimeHealth, t) => {
     >
       <Tag color={getRuntimeHealthColor(health.score)} shape='circle'>
         {health.score}%
+      </Tag>
+    </Tooltip>
+  );
+};
+
+const getBalanceCheckColor = (status) => {
+  switch (status) {
+    case 'success':
+      return 'green';
+    case 'failed':
+      return 'red';
+    case 'skipped':
+      return 'grey';
+    default:
+      return 'yellow';
+  }
+};
+
+const getBalanceCheckLabel = (status, t) => {
+  switch (status) {
+    case 'success':
+      return t('成功');
+    case 'failed':
+      return t('失败');
+    case 'skipped':
+      return t('跳过');
+    default:
+      return t('未检查');
+  }
+};
+
+const getBalanceCheckTriggerLabel = (trigger, t) => {
+  switch (trigger) {
+    case 'auto':
+      return t('自动巡检');
+    case 'manual':
+      return t('手动更新');
+    default:
+      return t('未知');
+  }
+};
+
+const renderBalanceCheck = (balanceCheck, t) => {
+  const check = normalizeBalanceCheck(balanceCheck);
+  const tooltipLines = [t('最近一次余额巡检结果')];
+
+  tooltipLines.push(`${t('状态')}：${getBalanceCheckLabel(check.status, t)}`);
+  if (check.checked_at > 0) {
+    tooltipLines.push(
+      `${t('时间')}：${timestamp2string(check.checked_at)}`,
+    );
+  }
+  if (check.trigger) {
+    tooltipLines.push(
+      `${t('触发方式')}：${getBalanceCheckTriggerLabel(check.trigger, t)}`,
+    );
+  }
+  if (check.reason) {
+    tooltipLines.push(`${t('原因')}：${check.reason}`);
+  }
+  if (check.status === 'failed') {
+    tooltipLines.push(
+      t('余额查询失败时，不会按“余额不足”自动禁用渠道。'),
+    );
+  }
+  if (check.status === 'unchecked') {
+    tooltipLines.push(t('当前还没有成功或失败的余额巡检记录。'));
+  }
+
+  return (
+    <Tooltip
+      content={
+        <div className='flex flex-col gap-1 max-w-xs'>
+          {tooltipLines.map((line) => (
+            <Typography.Text key={line} size='small'>
+              {line}
+            </Typography.Text>
+          ))}
+        </div>
+      }
+      position='topLeft'
+    >
+      <Tag color={getBalanceCheckColor(check.status)} shape='circle'>
+        {getBalanceCheckLabel(check.status, t)}
       </Tag>
     </Tooltip>
   );
@@ -591,6 +683,14 @@ export const getChannelsColumns = ({
       dataIndex: 'runtime_health',
       render: (text, record, index) => {
         return renderRuntimeHealth(record.runtime_health, t);
+      },
+    },
+    {
+      key: COLUMN_KEYS.BALANCE_CHECK,
+      title: t('余额巡检'),
+      dataIndex: 'balance_check',
+      render: (text, record, index) => {
+        return renderBalanceCheck(record.balance_check, t);
       },
     },
     {

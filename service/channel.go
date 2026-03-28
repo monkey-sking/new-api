@@ -13,6 +13,27 @@ import (
 	"github.com/QuantumNous/new-api/types"
 )
 
+var builtinInsufficientBalanceSignals = []string{
+	"insufficient balance",
+	"insufficient balances",
+	"insufficient credit",
+	"insufficient credits",
+	"credit balance is too low",
+	"your credit balance is too low",
+	"out of credits",
+	"no credits available",
+	"not enough balance",
+	"quota not enough",
+	"payment required",
+	"billing quota exceeded",
+	"billing hard limit",
+	"余额不足",
+	"额度不足",
+	"余额已用尽",
+	"额度已用尽",
+	"欠费",
+}
+
 func formatNotifyType(channelId int, status int) string {
 	return fmt.Sprintf("%s_%d_%d", dto.NotifyTypeChannelUpdate, channelId, status)
 }
@@ -57,6 +78,9 @@ func ShouldDisableChannel(channelType int, err *types.NewAPIError) bool {
 	if types.IsSkipRetryError(err) {
 		return false
 	}
+	if err.StatusCode == http.StatusPaymentRequired {
+		return true
+	}
 	if err.StatusCode == http.StatusTooManyRequests {
 		return true
 	}
@@ -100,6 +124,11 @@ func ShouldDisableChannel(channelType int, err *types.NewAPIError) bool {
 	}
 
 	lowerMessage := strings.ToLower(err.Error())
+	for _, signal := range builtinInsufficientBalanceSignals {
+		if strings.Contains(lowerMessage, signal) {
+			return true
+		}
+	}
 	search, _ := AcSearch(lowerMessage, operation_setting.AutomaticDisableKeywords, true)
 	return search
 }

@@ -356,7 +356,7 @@ func updateChannelMoonshotBalance(channel *model.Channel) (float64, error) {
 	return availableBalanceUsd, nil
 }
 
-func updateChannelBalance(channel *model.Channel) (float64, error) {
+func updateChannelBalance(channel *model.Channel, trigger string) (float64, error) {
 	baseURL := constant.ChannelBaseURLs[channel.Type]
 	if channel.GetBaseURL() == "" {
 		channel.BaseURL = &baseURL
@@ -367,37 +367,85 @@ func updateChannelBalance(channel *model.Channel) (float64, error) {
 			baseURL = channel.GetBaseURL()
 		}
 	case constant.ChannelTypeAzure:
-		return 0, errors.New("尚未实现")
+		err := errors.New("尚未实现")
+		channel.MarkBalanceCheckFailure(err.Error(), trigger)
+		return 0, err
 	case constant.ChannelTypeCustom:
 		baseURL = channel.GetBaseURL()
 	//case common.ChannelTypeOpenAISB:
 	//	return updateChannelOpenAISBBalance(channel)
 	case constant.ChannelTypeAIProxy:
-		return updateChannelAIProxyBalance(channel)
+		balance, err := updateChannelAIProxyBalance(channel)
+		if err != nil {
+			channel.MarkBalanceCheckFailure(err.Error(), trigger)
+			return 0, err
+		}
+		channel.MarkBalanceCheckSuccess(trigger)
+		return balance, nil
 	case constant.ChannelTypeAPI2GPT:
-		return updateChannelAPI2GPTBalance(channel)
+		balance, err := updateChannelAPI2GPTBalance(channel)
+		if err != nil {
+			channel.MarkBalanceCheckFailure(err.Error(), trigger)
+			return 0, err
+		}
+		channel.MarkBalanceCheckSuccess(trigger)
+		return balance, nil
 	case constant.ChannelTypeAIGC2D:
-		return updateChannelAIGC2DBalance(channel)
+		balance, err := updateChannelAIGC2DBalance(channel)
+		if err != nil {
+			channel.MarkBalanceCheckFailure(err.Error(), trigger)
+			return 0, err
+		}
+		channel.MarkBalanceCheckSuccess(trigger)
+		return balance, nil
 	case constant.ChannelTypeSiliconFlow:
-		return updateChannelSiliconFlowBalance(channel)
+		balance, err := updateChannelSiliconFlowBalance(channel)
+		if err != nil {
+			channel.MarkBalanceCheckFailure(err.Error(), trigger)
+			return 0, err
+		}
+		channel.MarkBalanceCheckSuccess(trigger)
+		return balance, nil
 	case constant.ChannelTypeDeepSeek:
-		return updateChannelDeepSeekBalance(channel)
+		balance, err := updateChannelDeepSeekBalance(channel)
+		if err != nil {
+			channel.MarkBalanceCheckFailure(err.Error(), trigger)
+			return 0, err
+		}
+		channel.MarkBalanceCheckSuccess(trigger)
+		return balance, nil
 	case constant.ChannelTypeOpenRouter:
-		return updateChannelOpenRouterBalance(channel)
+		balance, err := updateChannelOpenRouterBalance(channel)
+		if err != nil {
+			channel.MarkBalanceCheckFailure(err.Error(), trigger)
+			return 0, err
+		}
+		channel.MarkBalanceCheckSuccess(trigger)
+		return balance, nil
 	case constant.ChannelTypeMoonshot:
-		return updateChannelMoonshotBalance(channel)
+		balance, err := updateChannelMoonshotBalance(channel)
+		if err != nil {
+			channel.MarkBalanceCheckFailure(err.Error(), trigger)
+			return 0, err
+		}
+		channel.MarkBalanceCheckSuccess(trigger)
+		return balance, nil
 	default:
-		return 0, errors.New("尚未实现")
+		err := errors.New("尚未实现")
+		channel.MarkBalanceCheckFailure(err.Error(), trigger)
+		return 0, err
 	}
 	url := fmt.Sprintf("%s/v1/dashboard/billing/subscription", baseURL)
 
 	body, err := GetResponseBody("GET", url, channel, GetAuthHeader(channel.Key))
 	if err != nil {
+		channel.MarkBalanceCheckFailure(err.Error(), trigger)
 		return 0, err
 	}
 	subscription := OpenAISubscriptionResponse{}
 	err = json.Unmarshal(body, &subscription)
 	if err != nil {
+		channel.MarkBalanceCheckFailure(err.Error(), trigger)
 		return 0, err
 	}
 	now := time.Now()
@@ -409,15 +457,18 @@ func updateChannelBalance(channel *model.Channel) (float64, error) {
 	url = fmt.Sprintf("%s/v1/dashboard/billing/usage?start_date=%s&end_date=%s", baseURL, startDate, endDate)
 	body, err = GetResponseBody("GET", url, channel, GetAuthHeader(channel.Key))
 	if err != nil {
+		channel.MarkBalanceCheckFailure(err.Error(), trigger)
 		return 0, err
 	}
 	usage := OpenAIUsageResponse{}
 	err = json.Unmarshal(body, &usage)
 	if err != nil {
+		channel.MarkBalanceCheckFailure(err.Error(), trigger)
 		return 0, err
 	}
 	balance := subscription.HardLimitUSD - usage.TotalUsage/100
 	channel.UpdateBalance(balance)
+	channel.MarkBalanceCheckSuccess(trigger)
 	return balance, nil
 }
 
@@ -433,13 +484,14 @@ func UpdateChannelBalance(c *gin.Context) {
 		return
 	}
 	if channel.ChannelInfo.IsMultiKey {
+		channel.MarkBalanceCheckSkipped("多密钥渠道不支持余额查询", "manual")
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
 			"message": "多密钥渠道不支持余额查询",
 		})
 		return
 	}
-	balance, err := updateChannelBalance(channel)
+	balance, err := updateChannelBalance(channel, "manual")
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -461,13 +513,14 @@ func updateAllChannelsBalance() error {
 			continue
 		}
 		if channel.ChannelInfo.IsMultiKey {
+			channel.MarkBalanceCheckSkipped("多密钥渠道不支持余额查询", "auto")
 			continue // skip multi-key channels
 		}
 		// TODO: support Azure
 		//if channel.Type != common.ChannelTypeOpenAI && channel.Type != common.ChannelTypeCustom {
 		//	continue
 		//}
-		balance, err := updateChannelBalance(channel)
+		balance, err := updateChannelBalance(channel, "auto")
 		if err != nil {
 			continue
 		} else {
@@ -495,11 +548,36 @@ func UpdateAllChannelsBalance(c *gin.Context) {
 	return
 }
 
-func AutomaticallyUpdateChannels(frequency int) {
+func AutomaticallyUpdateChannels() {
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+
+	var lastRun time.Time
+	var lastFrequency int
+	loggedFrequency := -1
+
 	for {
-		time.Sleep(time.Duration(frequency) * time.Minute)
-		common.SysLog("updating all channels")
-		_ = updateAllChannelsBalance()
-		common.SysLog("channels update done")
+		frequency := common.ChannelUpdateFrequency
+		if frequency != loggedFrequency {
+			if frequency > 0 {
+				common.SysLog(fmt.Sprintf("channel balance auto update enabled: every %d minutes", frequency))
+			} else {
+				common.SysLog("channel balance auto update disabled")
+			}
+			loggedFrequency = frequency
+		}
+		shouldRun := frequency > 0 &&
+			(lastRun.IsZero() ||
+				(lastFrequency != frequency && time.Since(lastRun) >= time.Minute) ||
+				time.Since(lastRun) >= time.Duration(frequency)*time.Minute)
+
+		if shouldRun {
+			common.SysLog(fmt.Sprintf("updating all channels (frequency=%d minutes)", frequency))
+			_ = updateAllChannelsBalance()
+			common.SysLog("channels update done")
+			lastRun = time.Now()
+		}
+		lastFrequency = frequency
+		<-ticker.C
 	}
 }

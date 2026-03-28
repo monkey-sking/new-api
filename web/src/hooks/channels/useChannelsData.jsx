@@ -51,9 +51,21 @@ const DEFAULT_CHANNEL_RUNTIME_HEALTH = {
   scope: 'local_node',
 };
 
+const DEFAULT_CHANNEL_BALANCE_CHECK = {
+  status: 'unchecked',
+  checked_at: 0,
+  trigger: '',
+  reason: '',
+};
+
 const normalizeRuntimeHealth = (runtimeHealth) => ({
   ...DEFAULT_CHANNEL_RUNTIME_HEALTH,
   ...(runtimeHealth || {}),
+});
+
+const normalizeBalanceCheck = (balanceCheck) => ({
+  ...DEFAULT_CHANNEL_BALANCE_CHECK,
+  ...(balanceCheck || {}),
 });
 
 const mergeTagRuntimeHealth = (currentHealth, nextHealth) => {
@@ -81,6 +93,36 @@ const mergeTagRuntimeHealth = (currentHealth, nextHealth) => {
   }
 
   return merged;
+};
+
+const getBalanceCheckRank = (status) => {
+  switch (status) {
+    case 'failed':
+      return 4;
+    case 'unchecked':
+      return 3;
+    case 'skipped':
+      return 2;
+    case 'success':
+      return 1;
+    default:
+      return 0;
+  }
+};
+
+const mergeTagBalanceCheck = (currentBalanceCheck, nextBalanceCheck) => {
+  const current = normalizeBalanceCheck(currentBalanceCheck);
+  const next = normalizeBalanceCheck(nextBalanceCheck);
+  const currentRank = getBalanceCheckRank(current.status);
+  const nextRank = getBalanceCheckRank(next.status);
+
+  if (nextRank > currentRank) {
+    return next;
+  }
+  if (nextRank === currentRank && (next.checked_at || 0) >= (current.checked_at || 0)) {
+    return next;
+  }
+  return current;
 };
 
 export const useChannelsData = () => {
@@ -180,6 +222,7 @@ export const useChannelsData = () => {
     TYPE: 'type',
     STATUS: 'status',
     HEALTH: 'health',
+    BALANCE_CHECK: 'balance_check',
     RESPONSE_TIME: 'response_time',
     BALANCE: 'balance',
     PRIORITY: 'priority',
@@ -221,6 +264,7 @@ export const useChannelsData = () => {
       [COLUMN_KEYS.TYPE]: true,
       [COLUMN_KEYS.STATUS]: true,
       [COLUMN_KEYS.HEALTH]: true,
+      [COLUMN_KEYS.BALANCE_CHECK]: true,
       [COLUMN_KEYS.RESPONSE_TIME]: true,
       [COLUMN_KEYS.BALANCE]: true,
       [COLUMN_KEYS.PRIORITY]: true,
@@ -306,6 +350,7 @@ export const useChannelsData = () => {
             priority: -1,
             weight: -1,
             runtime_health: normalizeRuntimeHealth(),
+            balance_check: normalizeBalanceCheck(),
           };
           tagChannelDates.children = [];
           channelDates.push(tagChannelDates);
@@ -344,6 +389,10 @@ export const useChannelsData = () => {
         tagChannelDates.runtime_health = mergeTagRuntimeHealth(
           tagChannelDates.runtime_health,
           channels[i].runtime_health,
+        );
+        tagChannelDates.balance_check = mergeTagBalanceCheck(
+          tagChannelDates.balance_check,
+          channels[i].balance_check,
         );
         if (channels[i].status === 1) {
           tagChannelDates.status = 1;

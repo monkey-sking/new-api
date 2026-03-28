@@ -101,8 +101,20 @@ func main() {
 		if err != nil {
 			common.FatalLog("failed to parse CHANNEL_UPDATE_FREQUENCY: " + err.Error())
 		}
-		go controller.AutomaticallyUpdateChannels(frequency)
+		common.ChannelUpdateFrequency = frequency
+	} else if common.ChannelUpdateFrequency <= 0 {
+		common.OptionMapRWMutex.RLock()
+		configuredFrequency := strings.TrimSpace(common.OptionMap["ChannelUpdateFrequency"])
+		common.OptionMapRWMutex.RUnlock()
+		if configuredFrequency != "" {
+			frequency, err := strconv.Atoi(configuredFrequency)
+			if err != nil {
+				common.FatalLog("failed to parse option ChannelUpdateFrequency: " + err.Error())
+			}
+			common.ChannelUpdateFrequency = frequency
+		}
 	}
+	go controller.AutomaticallyUpdateChannels()
 
 	go controller.AutomaticallyTestChannels()
 

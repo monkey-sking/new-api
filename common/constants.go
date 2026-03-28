@@ -109,6 +109,7 @@ var AutomaticDisableConsecutiveFailureCount = 0
 var AutomaticDisableConsecutiveTimeoutCount = 0
 var AutomaticDisableThresholdWindowSeconds = 300
 var ChannelSoftDegradeWindowSeconds = 86400
+var ChannelUpdateFrequency = 0
 var AutomaticEnableChannelEnabled = false
 var QuotaRemindThreshold = 1000
 var PreConsumedQuota = 500

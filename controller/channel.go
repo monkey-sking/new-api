@@ -73,6 +73,9 @@ func enrichChannelRuntimeHealth(channels []*model.Channel) {
 		return
 	}
 	service.PopulateChannelRuntimeHealth(channels)
+	for _, channel := range channels {
+		channel.BalanceCheck = channel.GetBalanceCheck()
+	}
 }
 
 func GetAllChannels(c *gin.Context) {

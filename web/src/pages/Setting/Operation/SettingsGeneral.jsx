@@ -56,6 +56,7 @@ export default function GeneralSettings(props) {
     AutomaticDisableConsecutiveTimeoutCount: '',
     AutomaticDisableThresholdWindowSeconds: 300,
     ChannelSoftDegradeWindowSeconds: 86400,
+    ChannelUpdateFrequency: 0,
     USDExchangeRate: '',
     DisplayTokenStatEnabled: false,
     DefaultCollapseSidebar: false,
@@ -259,6 +260,16 @@ export default function GeneralSettings(props) {
                   initValue={86400}
                   placeholder={t('默认 86400 秒（1 天）')}
                   onChange={handleFieldChange('ChannelSoftDegradeWindowSeconds')}
+                  showClear
+                />
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.Input
+                  field={'ChannelUpdateFrequency'}
+                  label={t('渠道余额自动刷新频率（分钟）')}
+                  initValue={0}
+                  placeholder={t('0 表示关闭，建议 30 或 60')}
+                  onChange={handleFieldChange('ChannelUpdateFrequency')}
                   showClear
                 />
               </Col>

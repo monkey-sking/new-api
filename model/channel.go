@@ -57,6 +57,7 @@ type Channel struct {
 	Keys []string `json:"-" gorm:"-"`
 
 	RuntimeHealth *ChannelRuntimeHealth `json:"runtime_health,omitempty" gorm:"-"`
+	BalanceCheck  *ChannelBalanceCheck  `json:"balance_check,omitempty" gorm:"-"`
 }
 
 type ChannelRuntimeHealth struct {
@@ -69,6 +70,27 @@ type ChannelRuntimeHealth struct {
 	WindowSeconds    int    `json:"window_seconds"`
 	Scope            string `json:"scope,omitempty"`
 }
+
+type ChannelBalanceCheck struct {
+	Status    string `json:"status"`
+	CheckedAt int64  `json:"checked_at"`
+	Trigger   string `json:"trigger,omitempty"`
+	Reason    string `json:"reason,omitempty"`
+}
+
+const (
+	ChannelBalanceCheckStatusUnchecked = "unchecked"
+	ChannelBalanceCheckStatusSuccess   = "success"
+	ChannelBalanceCheckStatusFailed    = "failed"
+	ChannelBalanceCheckStatusSkipped   = "skipped"
+)
+
+const (
+	channelOtherInfoBalanceCheckStatus  = "balance_check_status"
+	channelOtherInfoBalanceCheckTime    = "balance_check_time"
+	channelOtherInfoBalanceCheckTrigger = "balance_check_trigger"
+	channelOtherInfoBalanceCheckReason  = "balance_check_reason"
+)
 
 type ChannelInfo struct {
 	IsMultiKey             bool                  `json:"is_multi_key"`                        // 是否多Key模式
@@ -236,12 +258,101 @@ func (channel *Channel) GetOtherInfo() map[string]interface{} {
 }
 
 func (channel *Channel) SetOtherInfo(otherInfo map[string]interface{}) {
-	otherInfoBytes, err := json.Marshal(otherInfo)
+	otherInfoBytes, err := common.Marshal(otherInfo)
 	if err != nil {
 		common.SysLog(fmt.Sprintf("failed to marshal other info: channel_id=%d, tag=%s, name=%s, error=%v", channel.Id, channel.GetTag(), channel.Name, err))
 		return
 	}
 	channel.OtherInfo = string(otherInfoBytes)
+}
+
+func normalizeChannelBalanceCheckStatus(status string) string {
+	switch status {
+	case ChannelBalanceCheckStatusSuccess,
+		ChannelBalanceCheckStatusFailed,
+		ChannelBalanceCheckStatusSkipped,
+		ChannelBalanceCheckStatusUnchecked:
+		return status
+	default:
+		return ChannelBalanceCheckStatusUnchecked
+	}
+}
+
+func channelBalanceCheckInt64(v interface{}) int64 {
+	switch value := v.(type) {
+	case int64:
+		return value
+	case int:
+		return int64(value)
+	case int32:
+		return int64(value)
+	case float64:
+		return int64(value)
+	case float32:
+		return int64(value)
+	case json.Number:
+		i, _ := value.Int64()
+		return i
+	default:
+		return 0
+	}
+}
+
+func channelBalanceCheckString(v interface{}) string {
+	if value, ok := v.(string); ok {
+		return value
+	}
+	return ""
+}
+
+func (channel *Channel) GetBalanceCheck() *ChannelBalanceCheck {
+	info := channel.GetOtherInfo()
+	result := &ChannelBalanceCheck{
+		Status: normalizeChannelBalanceCheckStatus(channelBalanceCheckString(info[channelOtherInfoBalanceCheckStatus])),
+	}
+	result.CheckedAt = channelBalanceCheckInt64(info[channelOtherInfoBalanceCheckTime])
+	result.Trigger = channelBalanceCheckString(info[channelOtherInfoBalanceCheckTrigger])
+	result.Reason = channelBalanceCheckString(info[channelOtherInfoBalanceCheckReason])
+
+	if result.Status == ChannelBalanceCheckStatusUnchecked && channel.BalanceUpdatedTime > 0 {
+		result.Status = ChannelBalanceCheckStatusSuccess
+	}
+	if result.CheckedAt <= 0 && result.Status == ChannelBalanceCheckStatusSuccess && channel.BalanceUpdatedTime > 0 {
+		result.CheckedAt = channel.BalanceUpdatedTime
+	}
+	return result
+}
+
+func (channel *Channel) updateBalanceCheckResult(status string, trigger string, reason string) {
+	info := channel.GetOtherInfo()
+	info[channelOtherInfoBalanceCheckStatus] = normalizeChannelBalanceCheckStatus(status)
+	info[channelOtherInfoBalanceCheckTime] = common.GetTimestamp()
+	if trigger != "" {
+		info[channelOtherInfoBalanceCheckTrigger] = trigger
+	} else {
+		delete(info, channelOtherInfoBalanceCheckTrigger)
+	}
+	if strings.TrimSpace(reason) != "" {
+		info[channelOtherInfoBalanceCheckReason] = reason
+	} else {
+		delete(info, channelOtherInfoBalanceCheckReason)
+	}
+	channel.SetOtherInfo(info)
+	if err := DB.Model(channel).Update("other_info", channel.OtherInfo).Error; err != nil {
+		common.SysLog(fmt.Sprintf("failed to update balance check result: channel_id=%d, error=%v", channel.Id, err))
+	}
+}
+
+func (channel *Channel) MarkBalanceCheckSuccess(trigger string) {
+	channel.updateBalanceCheckResult(ChannelBalanceCheckStatusSuccess, trigger, "")
+}
+
+func (channel *Channel) MarkBalanceCheckFailure(reason string, trigger string) {
+	channel.updateBalanceCheckResult(ChannelBalanceCheckStatusFailed, trigger, reason)
+}
+
+func (channel *Channel) MarkBalanceCheckSkipped(reason string, trigger string) {
+	channel.updateBalanceCheckResult(ChannelBalanceCheckStatusSkipped, trigger, reason)
 }
 
 func (channel *Channel) GetTag() string {

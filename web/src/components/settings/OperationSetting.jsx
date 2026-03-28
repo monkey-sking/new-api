@@ -48,6 +48,7 @@ const OperationSetting = () => {
     AutomaticDisableConsecutiveTimeoutCount: 0,
     AutomaticDisableThresholdWindowSeconds: 300,
     ChannelSoftDegradeWindowSeconds: 86400,
+    ChannelUpdateFrequency: 0,
     'general_setting.quota_display_type': 'USD',
     DisplayTokenStatEnabled: false,
     DefaultCollapseSidebar: false,
