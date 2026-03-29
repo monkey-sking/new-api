@@ -92,3 +92,40 @@ func TestShouldDisableChannelOnBuiltinInsufficientBalanceSignals(t *testing.T) {
 	)
 	require.True(t, ShouldDisableChannel(constant.ChannelTypeOpenAI, err))
 }
+
+func TestShouldDisableChannelOnUpstreamPoolExhaustionSignals(t *testing.T) {
+	origAutoDisable := common.AutomaticDisableChannelEnabled
+	origRanges := operation_setting.AutomaticDisableStatusCodeRanges
+	t.Cleanup(func() {
+		common.AutomaticDisableChannelEnabled = origAutoDisable
+		operation_setting.AutomaticDisableStatusCodeRanges = origRanges
+	})
+
+	common.AutomaticDisableChannelEnabled = true
+	operation_setting.AutomaticDisableStatusCodeRanges = []operation_setting.StatusCodeRange{{Start: 401, End: 401}}
+
+	tests := []struct {
+		name    string
+		message string
+	}{
+		{
+			name:    "account pool exhausted",
+			message: "No available accounts: no available accounts",
+		},
+		{
+			name:    "model pool exhausted",
+			message: "No available channel for model gpt-5.4 under group default",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := types.NewOpenAIError(
+				errors.New(tt.message),
+				types.ErrorCodeBadResponseStatusCode,
+				http.StatusServiceUnavailable,
+			)
+			require.True(t, ShouldDisableChannel(constant.ChannelTypeOpenAI, err))
+		})
+	}
+}

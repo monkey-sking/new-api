@@ -34,6 +34,13 @@ var builtinInsufficientBalanceSignals = []string{
 	"欠费",
 }
 
+var builtinUnavailablePoolSignals = []string{
+	"no available account",
+	"no available accounts",
+	"no available channel",
+	"no available channels",
+}
+
 func formatNotifyType(channelId int, status int) string {
 	return fmt.Sprintf("%s_%d_%d", dto.NotifyTypeChannelUpdate, channelId, status)
 }
@@ -125,6 +132,11 @@ func ShouldDisableChannel(channelType int, err *types.NewAPIError) bool {
 
 	lowerMessage := strings.ToLower(err.Error())
 	for _, signal := range builtinInsufficientBalanceSignals {
+		if strings.Contains(lowerMessage, signal) {
+			return true
+		}
+	}
+	for _, signal := range builtinUnavailablePoolSignals {
 		if strings.Contains(lowerMessage, signal) {
 			return true
 		}

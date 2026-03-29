@@ -785,6 +785,46 @@ func TestChannel(c *gin.Context) {
 var testAllChannelsLock sync.Mutex
 var testAllChannelsRunning bool = false
 
+func countEnabledChannels(channels []*model.Channel) int {
+	count := 0
+	for _, channel := range channels {
+		if channel != nil && channel.Status == common.ChannelStatusEnabled {
+			count++
+		}
+	}
+	return count
+}
+
+func countEnabledChannelsByType(channels []*model.Channel, channelType int) int {
+	count := 0
+	for _, channel := range channels {
+		if channel != nil && channel.Type == channelType && channel.Status == common.ChannelStatusEnabled {
+			count++
+		}
+	}
+	return count
+}
+
+func buildEnabledChannelCountByType(channels []*model.Channel) map[int]int {
+	counts := make(map[int]int)
+	for _, channel := range channels {
+		if channel != nil && channel.Status == common.ChannelStatusEnabled {
+			counts[channel.Type]++
+		}
+	}
+	return counts
+}
+
+func shouldProtectLastEnabledChannelFromHealthDisable(channel *model.Channel, enabledChannelCount int) bool {
+	if channel == nil {
+		return false
+	}
+	if channel.Status != common.ChannelStatusEnabled {
+		return false
+	}
+	return enabledChannelCount <= 1
+}
+
 func testAllChannels(notify bool) error {
 
 	testAllChannelsLock.Lock()
@@ -810,11 +850,13 @@ func testAllChannels(notify bool) error {
 			testAllChannelsLock.Unlock()
 		}()
 
+		enabledChannelCountByType := buildEnabledChannelCountByType(channels)
 		for _, channel := range channels {
 			if channel.Status == common.ChannelStatusManuallyDisabled {
 				continue
 			}
 			isChannelEnabled := channel.Status == common.ChannelStatusEnabled
+			enabledChannelCount := enabledChannelCountByType[channel.Type]
 			tik := time.Now()
 			result := testChannel(channel, "", "", false)
 			tok := time.Now()
@@ -838,7 +880,14 @@ func testAllChannels(notify bool) error {
 
 			// disable channel
 			if isChannelEnabled && shouldBanChannel && channel.GetAutoBan() {
-				processChannelError(result.context, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(result.context, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
+				if shouldProtectLastEnabledChannelFromHealthDisable(channel, enabledChannelCount) {
+					common.SysLog(fmt.Sprintf("跳过自动禁用通道「%s」（#%d，类型 %d）：这是当前健康测试中该类型最后一个启用渠道", channel.Name, channel.Id, channel.Type))
+				} else {
+					if enabledChannelCount > 0 {
+						enabledChannelCountByType[channel.Type] = enabledChannelCount - 1
+					}
+					processChannelError(result.context, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(result.context, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
+				}
 			}
 
 			// enable channel

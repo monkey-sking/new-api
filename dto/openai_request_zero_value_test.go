@@ -71,3 +71,14 @@ func TestOpenAIResponsesRequestPreserveExplicitZeroValues(t *testing.T) {
 	require.True(t, gjson.GetBytes(encoded, "stream").Exists())
 	require.True(t, gjson.GetBytes(encoded, "top_p").Exists())
 }
+
+func TestMessageImageUrlOmitsEmptyDetail(t *testing.T) {
+	t.Parallel()
+
+	encoded, err := common.Marshal(MessageImageUrl{
+		Url: "https://example.com/image.png",
+	})
+	require.NoError(t, err)
+
+	require.False(t, gjson.GetBytes(encoded, "detail").Exists())
+}
