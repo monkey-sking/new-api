@@ -608,6 +608,38 @@ const EditChannelModal = (props) => {
     handleInputChange('settings', settingsJson);
   };
 
+  const applyClipboardConfig = (config) => {
+    if (!config) return;
+    setInputs((prev) => ({
+      ...prev,
+      key: config.key,
+      base_url: config.url,
+    }));
+    if (formApiRef.current) {
+      formApiRef.current.setValue('key', config.key);
+      formApiRef.current.setValue('base_url', config.url);
+    }
+    setClipboardConfig(null);
+    showSuccess(t('连接信息已填入'));
+  };
+
+  const pasteFromClipboard = async () => {
+    if (!navigator?.clipboard?.readText) {
+      showError(t('无法读取剪贴板'));
+      return;
+    }
+    try {
+      const text = await navigator.clipboard.readText();
+      const parsed = parseChannelConnectionString(text);
+      if (parsed) {
+        applyClipboardConfig(parsed);
+      } else {
+        showInfo(t('剪贴板中未检测到连接信息'));
+      }
+    } catch {
+      showError(t('无法读取剪贴板'));
+    }
+  };
   const isIonetLocked = isIonetChannel && isEdit;
 
   const handleInputChange = (name, value) => {
@@ -1383,6 +1415,14 @@ const EditChannelModal = (props) => {
         loadChannel();
       } else {
         formApiRef.current?.setValues(getInitValues());
+        try {
+          navigator?.clipboard?.readText()?.then((text) => {
+            const parsed = parseChannelConnectionString(text);
+            if (parsed) {
+              setClipboardConfig(parsed);
+            }
+          }).catch(() => {});
+        } catch {}
       }
       fetchModelGroups();
       // 重置手动输入模式状态
