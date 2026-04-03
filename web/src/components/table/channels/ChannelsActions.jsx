@@ -317,6 +317,18 @@ const ChannelsActions = ({
             >
               <Select.Option value='all'>{t('全部')}</Select.Option>
               <Select.Option value='enabled'>{t('已启用')}</Select.Option>
+              <Select.Option value='server_error'>
+                {t('服务器失效')}
+              </Select.Option>
+              <Select.Option value='insufficient_balance'>
+                {t('余额不足')}
+              </Select.Option>
+              <Select.Option value='balance_check_failed'>
+                {t('巡检失败')}
+              </Select.Option>
+              <Select.Option value='manual_disabled'>
+                {t('手动禁用')}
+              </Select.Option>
               <Select.Option value='disabled'>{t('已禁用')}</Select.Option>
             </Select>
           </div>

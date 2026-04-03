@@ -19,6 +19,7 @@ import (
 	"github.com/QuantumNous/new-api/service"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 type OpenAIModel struct {
@@ -50,17 +51,6 @@ type OpenAIModelsResponse struct {
 	Success bool          `json:"success"`
 }
 
-func parseStatusFilter(statusParam string) int {
-	switch strings.ToLower(statusParam) {
-	case "enabled", "1":
-		return common.ChannelStatusEnabled
-	case "disabled", "0":
-		return 0
-	default:
-		return -1
-	}
-}
-
 func clearChannelInfo(channel *model.Channel) {
 	if channel.ChannelInfo.IsMultiKey {
 		channel.ChannelInfo.MultiKeyDisabledReason = nil
@@ -84,7 +74,6 @@ func GetAllChannels(c *gin.Context) {
 	idSort, _ := strconv.ParseBool(c.Query("id_sort"))
 	enableTagMode, _ := strconv.ParseBool(c.Query("tag_mode"))
 	statusParam := c.Query("status")
-	// statusFilter: -1 all, 1 enabled, 0 disabled (include auto & manual)
 	statusFilter := parseStatusFilter(statusParam)
 	// type filter
 	typeStr := c.Query("type")
@@ -114,13 +103,10 @@ func GetAllChannels(c *gin.Context) {
 			}
 			filtered := make([]*model.Channel, 0)
 			for _, ch := range tagChannels {
-				if statusFilter == common.ChannelStatusEnabled && ch.Status != common.ChannelStatusEnabled {
-					continue
-				}
-				if statusFilter == 0 && ch.Status == common.ChannelStatusEnabled {
-					continue
-				}
 				if typeFilter >= 0 && ch.Type != typeFilter {
+					continue
+				}
+				if !matchesChannelStatusFilter(ch, statusFilter) {
 					continue
 				}
 				filtered = append(filtered, ch)
@@ -130,23 +116,77 @@ func GetAllChannels(c *gin.Context) {
 		total, _ = model.CountAllTags()
 	} else {
 		baseQuery := model.DB.Model(&model.Channel{})
-		if typeFilter >= 0 {
-			baseQuery = baseQuery.Where("type = ?", typeFilter)
-		}
-		if statusFilter == common.ChannelStatusEnabled {
+		if statusFilter == channelStatusFilterEnabled {
 			baseQuery = baseQuery.Where("status = ?", common.ChannelStatusEnabled)
-		} else if statusFilter == 0 {
+		} else if statusFilter == channelStatusFilterDisabled {
 			baseQuery = baseQuery.Where("status != ?", common.ChannelStatusEnabled)
+		} else if statusFilter == channelStatusFilterManualDisabled {
+			baseQuery = baseQuery.Where("status = ?", common.ChannelStatusManuallyDisabled)
 		}
-
-		baseQuery.Count(&total)
 
 		order := "priority desc"
 		if idSort {
 			order = "id desc"
 		}
 
-		err := baseQuery.Order(order).Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Omit("key").Find(&channelData).Error
+		if isDerivedStatusFilter(statusFilter) {
+			allChannels := make([]*model.Channel, 0)
+			err := baseQuery.Order(order).Omit("key").Find(&allChannels).Error
+			if err != nil {
+				common.SysError("failed to get channels: " + err.Error())
+				c.JSON(http.StatusOK, gin.H{"success": false, "message": "获取渠道列表失败，请稍后重试"})
+				return
+			}
+
+			enrichChannelRuntimeHealth(allChannels)
+			filteredChannels := filterChannelsByStatus(allChannels, statusFilter)
+			typeCounts := make(map[int64]int64)
+			for _, channel := range filteredChannels {
+				typeCounts[int64(channel.Type)]++
+			}
+
+			if typeFilter >= 0 {
+				filteredByType := make([]*model.Channel, 0, len(filteredChannels))
+				for _, channel := range filteredChannels {
+					if channel.Type == typeFilter {
+						filteredByType = append(filteredByType, channel)
+					}
+				}
+				filteredChannels = filteredByType
+			}
+
+			total = int64(len(filteredChannels))
+			startIdx := pageInfo.GetStartIdx()
+			if startIdx > len(filteredChannels) {
+				startIdx = len(filteredChannels)
+			}
+			endIdx := startIdx + pageInfo.GetPageSize()
+			if endIdx > len(filteredChannels) {
+				endIdx = len(filteredChannels)
+			}
+			channelData = filteredChannels[startIdx:endIdx]
+
+			for _, datum := range channelData {
+				clearChannelInfo(datum)
+			}
+			common.ApiSuccess(c, gin.H{
+				"items":       channelData,
+				"total":       total,
+				"page":        pageInfo.GetPage(),
+				"page_size":   pageInfo.GetPageSize(),
+				"type_counts": typeCounts,
+			})
+			return
+		}
+
+		countQuery := baseQuery.Session(&gorm.Session{})
+		if typeFilter >= 0 {
+			baseQuery = baseQuery.Where("type = ?", typeFilter)
+		}
+
+		countQuery.Count(&total)
+		query := baseQuery.Order(order).Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Omit("key")
+		err := query.Find(&channelData).Error
 		if err != nil {
 			common.SysError("failed to get channels: " + err.Error())
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "获取渠道列表失败，请稍后重试"})
@@ -157,20 +197,24 @@ func GetAllChannels(c *gin.Context) {
 	for _, datum := range channelData {
 		clearChannelInfo(datum)
 	}
-	enrichChannelRuntimeHealth(channelData)
+	if enableTagMode {
+		enrichChannelRuntimeHealth(channelData)
+	}
 
 	countQuery := model.DB.Model(&model.Channel{})
-	if statusFilter == common.ChannelStatusEnabled {
+	if statusFilter == channelStatusFilterEnabled {
 		countQuery = countQuery.Where("status = ?", common.ChannelStatusEnabled)
-	} else if statusFilter == 0 {
+	} else if statusFilter == channelStatusFilterDisabled {
 		countQuery = countQuery.Where("status != ?", common.ChannelStatusEnabled)
+	} else if statusFilter == channelStatusFilterManualDisabled {
+		countQuery = countQuery.Where("status = ?", common.ChannelStatusManuallyDisabled)
 	}
+	typeCounts := make(map[int64]int64)
 	var results []struct {
 		Type  int64
 		Count int64
 	}
 	_ = countQuery.Select("type, count(*) as count").Group("type").Find(&results).Error
-	typeCounts := make(map[int64]int64)
 	for _, r := range results {
 		typeCounts[r.Type] = r.Count
 	}
@@ -294,19 +338,8 @@ func SearchChannels(c *gin.Context) {
 		channelData = channels
 	}
 
-	if statusFilter == common.ChannelStatusEnabled || statusFilter == 0 {
-		filtered := make([]*model.Channel, 0, len(channelData))
-		for _, ch := range channelData {
-			if statusFilter == common.ChannelStatusEnabled && ch.Status != common.ChannelStatusEnabled {
-				continue
-			}
-			if statusFilter == 0 && ch.Status == common.ChannelStatusEnabled {
-				continue
-			}
-			filtered = append(filtered, ch)
-		}
-		channelData = filtered
-	}
+	enrichChannelRuntimeHealth(channelData)
+	channelData = filterChannelsByStatus(channelData, statusFilter)
 
 	// calculate type counts for search results
 	typeCounts := make(map[int64]int64)
@@ -356,7 +389,6 @@ func SearchChannels(c *gin.Context) {
 	for _, datum := range pagedData {
 		clearChannelInfo(datum)
 	}
-	enrichChannelRuntimeHealth(pagedData)
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
