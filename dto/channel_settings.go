@@ -40,6 +40,12 @@ type ChannelOtherSettings struct {
 	UpstreamModelUpdateLastDetectedModels []string      `json:"upstream_model_update_last_detected_models,omitempty"` // 上次检测到的可加入模型
 	UpstreamModelUpdateLastRemovedModels  []string      `json:"upstream_model_update_last_removed_models,omitempty"`  // 上次检测到的可删除模型
 	UpstreamModelUpdateIgnoredModels      []string      `json:"upstream_model_update_ignored_models,omitempty"`       // 手动忽略的模型
+	UpstreamPlatform                      string        `json:"upstream_platform,omitempty"`
+	UpstreamPreset                        string        `json:"upstream_preset,omitempty"`
+	UpstreamCheckinEnabled                bool          `json:"upstream_checkin_enabled,omitempty"`
+	UpstreamCheckinIntervalHours          int           `json:"upstream_checkin_interval_hours,omitempty"`
+	UpstreamCheckinAccessToken            string        `json:"upstream_checkin_access_token,omitempty"`
+	UpstreamCheckinUserID                 int           `json:"upstream_checkin_user_id,omitempty"`
 }
 
 func (s *ChannelOtherSettings) IsOpenRouterEnterprise() bool {

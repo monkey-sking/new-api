@@ -573,6 +573,10 @@ func AutomaticallyUpdateChannels() {
 
 		if shouldRun {
 			common.SysLog(fmt.Sprintf("updating all channels (frequency=%d minutes)", frequency))
+			disabledCount := service.DisableStaleChannelsByStoredReason()
+			if disabledCount > 0 {
+				common.SysLog(fmt.Sprintf("stale channel auto-disable sweep done: disabled=%d", disabledCount))
+			}
 			_ = updateAllChannelsBalance()
 			common.SysLog("channels update done")
 			lastRun = time.Now()

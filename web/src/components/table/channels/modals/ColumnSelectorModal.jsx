@@ -46,6 +46,13 @@ const ColumnSelectorModal = ({
   refresh,
   activePage,
   channels,
+  upstreamCheckinLoadingMap,
+  runChannelUpstreamCheckin,
+  checkOllamaVersion,
+  setShowMultiKeyManageModal,
+  setCurrentMultiKeyChannel,
+  openUpstreamUpdateModal,
+  detectChannelUpstreamUpdates,
 }) => {
   // Get all columns for display in selector
   const allColumns = getChannelsColumns({
@@ -66,6 +73,13 @@ const ColumnSelectorModal = ({
     refresh,
     activePage,
     channels,
+    upstreamCheckinLoadingMap,
+    runChannelUpstreamCheckin,
+    checkOllamaVersion,
+    setShowMultiKeyManageModal,
+    setCurrentMultiKeyChannel,
+    openUpstreamUpdateModal,
+    detectChannelUpstreamUpdates,
   });
 
   return (

@@ -65,6 +65,10 @@ import SecureVerificationModal from '../../../common/modals/SecureVerificationMo
 import StatusCodeRiskGuardModal from './StatusCodeRiskGuardModal';
 import ChannelKeyDisplay from '../../../common/ui/ChannelKeyDisplay';
 import { useSecureVerification } from '../../../../hooks/common/useSecureVerification';
+import {
+  getUpstreamCheckinInfo,
+  getUpstreamCheckinStatusMeta,
+} from '../../../../hooks/channels/upstreamCheckinUtils';
 import { createApiCalls } from '../../../../services/secureVerification';
 import {
   collectInvalidStatusCodeEntries,
@@ -243,6 +247,13 @@ const EditChannelModal = (props) => {
     upstream_model_update_last_check_time: 0,
     upstream_model_update_last_detected_models: [],
     upstream_model_update_ignored_models: '',
+    upstream_platform: '',
+    upstream_preset: '',
+    upstream_checkin_enabled: false,
+    upstream_checkin_interval_hours: 24,
+    upstream_checkin_access_token: '',
+    upstream_checkin_user_id: 0,
+    other_info: '',
   };
   const [batch, setBatch] = useState(false);
   const [multiToSingle, setMultiToSingle] = useState(false);
@@ -279,6 +290,10 @@ const EditChannelModal = (props) => {
   const [keyMode, setKeyMode] = useState('append'); // 密钥模式：replace（覆盖）或 append（追加）
   const [isEnterpriseAccount, setIsEnterpriseAccount] = useState(false); // 是否为企业账户
   const [doubaoApiEditUnlocked, setDoubaoApiEditUnlocked] = useState(false); // 豆包渠道自定义 API 地址隐藏入口
+  const [upstreamPresets, setUpstreamPresets] = useState([]);
+  const [upstreamDetection, setUpstreamDetection] = useState(null);
+  const [upstreamDetecting, setUpstreamDetecting] = useState(false);
+  const [upstreamCheckinLoading, setUpstreamCheckinLoading] = useState(false);
   const redirectModelList = useMemo(() => {
     const mapping = inputs.model_mapping;
     if (typeof mapping !== 'string') return [];
@@ -389,6 +404,22 @@ const EditChannelModal = (props) => {
       };
     }
   }, [inputs.param_override, t]);
+  const upstreamCheckinInfo = useMemo(() => {
+    return getUpstreamCheckinInfo(inputs.other_info);
+  }, [inputs.other_info]);
+  const upstreamCheckinStatusMeta = useMemo(
+    () => getUpstreamCheckinStatusMeta(upstreamCheckinInfo.status, t),
+    [upstreamCheckinInfo.status, t],
+  );
+  const selectedUpstreamPreset = useMemo(
+    () =>
+      upstreamPresets.find(
+        (preset) =>
+          preset.id === inputs.upstream_preset ||
+          preset.platform === inputs.upstream_platform,
+      ) || null,
+    [inputs.upstream_platform, inputs.upstream_preset, upstreamPresets],
+  );
   const [isIonetChannel, setIsIonetChannel] = useState(false);
   const [ionetMetadata, setIonetMetadata] = useState(null);
   const [codexOAuthModalVisible, setCodexOAuthModalVisible] = useState(false);
@@ -860,6 +891,120 @@ const EditChannelModal = (props) => {
     handleInputChange('param_override', '');
   };
 
+  const loadUpstreamPresets = async () => {
+    const res = await API.get('/api/channel/upstream/presets', {
+      skipErrorHandler: true,
+    });
+    if (res?.data?.success && Array.isArray(res.data.data)) {
+      setUpstreamPresets(res.data.data);
+      return res.data.data;
+    }
+    return [];
+  };
+
+  const applyUpstreamPreset = (preset, options = {}) => {
+    if (!preset) {
+      return;
+    }
+    handleInputChange('upstream_preset', preset.id || '');
+    handleInputChange('upstream_platform', preset.platform || '');
+    if (
+      preset.suggested_channel_type &&
+      preset.suggested_channel_type !== inputs.type &&
+      !isIonetLocked
+    ) {
+      handleInputChange('type', preset.suggested_channel_type);
+    }
+    const nextBaseUrl =
+      options.baseURL ||
+      (!String(inputs.base_url || '').trim() ? preset.base_url_hint : '');
+    if (nextBaseUrl) {
+      handleInputChange('base_url', nextBaseUrl);
+    }
+    if (options.announce !== false) {
+      showSuccess(
+        t('已套用上游预设：{{name}}', {
+          name: preset.name || preset.platform || 'preset',
+        }),
+      );
+    }
+  };
+
+  const handleDetectUpstreamPreset = async () => {
+    const baseURL = String(inputs.base_url || '').trim();
+    if (!baseURL) {
+      showInfo(t('请先填写 API 地址'));
+      return;
+    }
+
+    setUpstreamDetecting(true);
+    try {
+      const res = await API.post(
+        '/api/channel/upstream/detect',
+        {
+          base_url: baseURL,
+          type: inputs.type,
+        },
+        { skipErrorHandler: true },
+      );
+      if (!res?.data?.success) {
+        throw new Error(res?.data?.message || t('识别失败'));
+      }
+      const detection = res.data?.data?.detection || null;
+      const presets = Array.isArray(res.data?.data?.presets)
+        ? res.data.data.presets
+        : [];
+      if (presets.length > 0) {
+        setUpstreamPresets(presets);
+      }
+      if (!detection?.matched || !detection?.preset) {
+        setUpstreamDetection(null);
+        showInfo(t('未识别到已知上游平台'));
+        return;
+      }
+      setUpstreamDetection(detection);
+      applyUpstreamPreset(detection.preset, {
+        baseURL: detection.normalized_base_url,
+        announce: false,
+      });
+      showSuccess(
+        t('已识别为 {{name}}', {
+          name: detection.preset.name || detection.platform,
+        }),
+      );
+    } catch (error) {
+      showError(error.message || t('识别失败'));
+    } finally {
+      setUpstreamDetecting(false);
+    }
+  };
+
+  const handleRunUpstreamCheckin = async () => {
+    if (!isEdit) {
+      showInfo(t('请先保存渠道后再执行签到'));
+      return;
+    }
+
+    setUpstreamCheckinLoading(true);
+    try {
+      const res = await API.post(
+        `/api/channel/${channelId}/upstream_checkin`,
+        {},
+        { skipErrorHandler: true },
+      );
+      if (res?.data?.success) {
+        showSuccess(res.data.message || t('签到成功'));
+      } else {
+        showInfo(res?.data?.message || t('签到已执行'));
+      }
+      await loadChannel();
+    } catch (error) {
+      showError(error.message || t('签到失败'));
+    } finally {
+      setUpstreamCheckinLoading(false);
+    }
+  };
+
   const loadChannel = async () => {
     setLoading(true);
     let res = await API.get(`/api/channel/${channelId}`);
@@ -967,6 +1112,16 @@ const EditChannelModal = (props) => {
           )
             ? parsedSettings.upstream_model_update_ignored_models.join(',')
             : '';
+          data.upstream_platform = parsedSettings.upstream_platform || '';
+          data.upstream_preset = parsedSettings.upstream_preset || '';
+          data.upstream_checkin_enabled =
+            parsedSettings.upstream_checkin_enabled === true;
+          data.upstream_checkin_interval_hours =
+            Number(parsedSettings.upstream_checkin_interval_hours) || 24;
+          data.upstream_checkin_access_token =
+            parsedSettings.upstream_checkin_access_token || '';
+          data.upstream_checkin_user_id =
+            Number(parsedSettings.upstream_checkin_user_id) || 0;
         } catch (error) {
           console.error('解析其他设置失败:', error);
           data.azure_responses_version = '';
@@ -985,6 +1140,12 @@ const EditChannelModal = (props) => {
           data.upstream_model_update_last_check_time = 0;
           data.upstream_model_update_last_detected_models = [];
           data.upstream_model_update_ignored_models = '';
+          data.upstream_platform = '';
+          data.upstream_preset = '';
+          data.upstream_checkin_enabled = false;
+          data.upstream_checkin_interval_hours = 24;
+          data.upstream_checkin_access_token = '';
+          data.upstream_checkin_user_id = 0;
         }
       } else {
         // 兼容历史数据：老渠道没有 settings 时，默认按 json 展示
@@ -1002,6 +1163,12 @@ const EditChannelModal = (props) => {
         data.upstream_model_update_last_check_time = 0;
         data.upstream_model_update_last_detected_models = [];
         data.upstream_model_update_ignored_models = '';
+        data.upstream_platform = '';
+        data.upstream_preset = '';
+        data.upstream_checkin_enabled = false;
+        data.upstream_checkin_interval_hours = 24;
+        data.upstream_checkin_access_token = '';
+        data.upstream_checkin_user_id = 0;
       }
 
       if (
@@ -1391,6 +1558,7 @@ const EditChannelModal = (props) => {
   useEffect(() => {
     fetchModels().then();
     fetchGroups().then();
+    loadUpstreamPresets().then();
     if (!isEdit) {
       setInputs(originInputs);
       if (formApiRef.current) {
@@ -1411,6 +1579,7 @@ const EditChannelModal = (props) => {
   useEffect(() => {
     setModelSearchValue('');
     if (props.visible) {
+      loadUpstreamPresets().then();
       if (isEdit) {
         loadChannel();
       } else {
@@ -1471,6 +1640,9 @@ const EditChannelModal = (props) => {
     setIsEnterpriseAccount(false);
     // 重置豆包隐藏入口状态
     setDoubaoApiEditUnlocked(false);
+    setUpstreamDetection(null);
+    setUpstreamCheckinLoading(false);
+    setUpstreamDetecting(false);
     doubaoApiClickCountRef.current = 0;
     setModelSearchValue('');
     // 清空表单中的key_mode字段
@@ -1899,6 +2071,23 @@ const EditChannelModal = (props) => {
     if (typeof settings.upstream_model_update_last_check_time !== 'number') {
       settings.upstream_model_update_last_check_time = 0;
     }
+    settings.upstream_platform = String(
+      localInputs.upstream_platform || '',
+    ).trim();
+    settings.upstream_preset = String(localInputs.upstream_preset || '').trim();
+    settings.upstream_checkin_enabled =
+      localInputs.upstream_checkin_enabled === true;
+    settings.upstream_checkin_interval_hours =
+      Number(localInputs.upstream_checkin_interval_hours) > 0
+        ? Number(localInputs.upstream_checkin_interval_hours)
+        : 24;
+    settings.upstream_checkin_access_token = String(
+      localInputs.upstream_checkin_access_token || '',
+    ).trim();
+    settings.upstream_checkin_user_id =
+      Number(localInputs.upstream_checkin_user_id) > 0
+        ? Number(localInputs.upstream_checkin_user_id)
+        : 0;
 
     localInputs.settings = JSON.stringify(settings);
 
@@ -1926,6 +2115,12 @@ const EditChannelModal = (props) => {
     delete localInputs.upstream_model_update_last_check_time;
     delete localInputs.upstream_model_update_last_detected_models;
     delete localInputs.upstream_model_update_ignored_models;
+    delete localInputs.upstream_platform;
+    delete localInputs.upstream_preset;
+    delete localInputs.upstream_checkin_enabled;
+    delete localInputs.upstream_checkin_interval_hours;
+    delete localInputs.upstream_checkin_access_token;
+    delete localInputs.upstream_checkin_user_id;
 
     let res;
     localInputs.auto_ban = localInputs.auto_ban ? 1 : 0;
@@ -3210,6 +3405,231 @@ const EditChannelModal = (props) => {
                           />
                         </div>
                       )}
+
+                      <div className='space-y-3'>
+                        <div className='flex items-center justify-between gap-2'>
+                          <div>
+                            <Text className='text-sm font-medium'>
+                              {t('上游接入助手')}
+                            </Text>
+                            <div className='text-xs text-gray-500'>
+                              {t('可自动识别 new-api / one-api / one-hub / veloera / anyrouter 等站点')}
+                            </div>
+                          </div>
+                          <Button
+                            size='small'
+                            icon={<IconSearch size={14} />}
+                            loading={upstreamDetecting}
+                            disabled={!String(inputs.base_url || '').trim()}
+                            onClick={handleDetectUpstreamPreset}
+                          >
+                            {t('自动识别')}
+                          </Button>
+                        </div>
+
+                        {(upstreamDetection?.matched || selectedUpstreamPreset) && (
+                          <Banner
+                            type={
+                              (upstreamDetection?.preset || selectedUpstreamPreset)
+                                ?.checkin_supported
+                                ? 'success'
+                                : 'info'
+                            }
+                            description={
+                              <div className='text-sm leading-6'>
+                                <div>
+                                  {t('当前预设')}:&nbsp;
+                                  <Text strong>
+                                    {(upstreamDetection?.preset ||
+                                      selectedUpstreamPreset)?.name ||
+                                      t('未识别')}
+                                  </Text>
+                                  <Tag
+                                    color={
+                                      (upstreamDetection?.preset ||
+                                        selectedUpstreamPreset)
+                                        ?.checkin_supported
+                                        ? 'green'
+                                        : 'grey'
+                                    }
+                                    size='small'
+                                    className='ml-2'
+                                  >
+                                    {(upstreamDetection?.preset ||
+                                      selectedUpstreamPreset)
+                                      ?.checkin_supported
+                                      ? t('支持签到')
+                                      : t('不支持签到')}
+                                  </Tag>
+                                </div>
+                                {(upstreamDetection?.preset ||
+                                  selectedUpstreamPreset)?.description && (
+                                  <div className='text-xs text-gray-600 mt-1'>
+                                    {
+                                      (upstreamDetection?.preset ||
+                                        selectedUpstreamPreset).description
+                                    }
+                                  </div>
+                                )}
+                              </div>
+                            }
+                            className='!rounded-lg'
+                          />
+                        )}
+
+                        <Form.Select
+                          field='upstream_preset'
+                          label={t('上游平台预设')}
+                          placeholder={t('可选，记录上游站点类型并带出推荐配置')}
+                          optionList={upstreamPresets.map((preset) => ({
+                            value: preset.id,
+                            label: `${preset.name}${
+                              preset.checkin_supported
+                                ? ` · ${t('支持签到')}`
+                                : ''
+                            }`,
+                          }))}
+                          onChange={(value) => {
+                            handleInputChange('upstream_preset', value || '');
+                            if (!value) {
+                              handleInputChange('upstream_platform', '');
+                              return;
+                            }
+                            const preset = upstreamPresets.find(
+                              (item) => item.id === value,
+                            );
+                            if (preset) {
+                              applyUpstreamPreset(preset, { announce: false });
+                            }
+                          }}
+                          showClear
+                        />
+
+                        <div className='border border-gray-100 rounded-xl p-4 bg-gray-50/70 space-y-3'>
+                          <div className='flex items-center justify-between gap-2'>
+                            <div>
+                              <Text className='text-sm font-medium'>
+                                {t('上游签到')}
+                              </Text>
+                              <div className='text-xs text-gray-500'>
+                                {t('适合单用户接入 new-api / one-api / one-hub / veloera / anyrouter 这类面板站')}
+                              </div>
+                            </div>
+                            <Tag color={upstreamCheckinStatusMeta.color}>
+                              {upstreamCheckinStatusMeta.label}
+                            </Tag>
+                          </div>
+
+                          <Banner
+                            type={
+                              selectedUpstreamPreset?.checkin_supported
+                                ? 'info'
+                                : 'warning'
+                            }
+                            description={
+                              selectedUpstreamPreset?.checkin_supported
+                                ? t(
+                                    '签到使用单独的 access token 与 user id，不会替换渠道自己的转发 key。',
+                                  )
+                                : t(
+                                    '当前预设未标记为可签到面板；如果只是做代理调用，可以忽略这一节。',
+                                  )
+                            }
+                            className='!rounded-lg'
+                          />
+
+                          <Form.Switch
+                            field='upstream_checkin_enabled'
+                            label={t('启用自动签到')}
+                            checkedText={t('开')}
+                            uncheckedText={t('关')}
+                            onChange={(value) =>
+                              handleInputChange('upstream_checkin_enabled', value)
+                            }
+                            extraText={t('由后端定时任务按间隔自动执行签到')}
+                          />
+
+                          <Row gutter={12}>
+                            <Col span={12}>
+                              <Form.InputNumber
+                                field='upstream_checkin_interval_hours'
+                                label={t('签到间隔（小时）')}
+                                min={1}
+                                placeholder={t('默认 24')}
+                                onNumberChange={(value) =>
+                                  handleInputChange(
+                                    'upstream_checkin_interval_hours',
+                                    value,
+                                  )
+                                }
+                                style={{ width: '100%' }}
+                              />
+                            </Col>
+                            <Col span={12}>
+                              <Form.InputNumber
+                                field='upstream_checkin_user_id'
+                                label={t('上游用户 ID')}
+                                min={0}
+                                placeholder={t('例如：7')}
+                                onNumberChange={(value) =>
+                                  handleInputChange(
+                                    'upstream_checkin_user_id',
+                                    value,
+                                  )
+                                }
+                                style={{ width: '100%' }}
+                              />
+                            </Col>
+                          </Row>
+
+                          <Form.Input
+                            field='upstream_checkin_access_token'
+                            label={t('签到 Access Token')}
+                            placeholder={t('填写上游站点登录后的 access token')}
+                            mode='password'
+                            autoComplete='new-password'
+                            onChange={(value) =>
+                              handleInputChange(
+                                'upstream_checkin_access_token',
+                                value,
+                              )
+                            }
+                            showClear
+                          />
+
+                          <div className='text-xs text-gray-500 leading-6'>
+                            <div>
+                              {t('最近一次')}: {formatUnixTime(upstreamCheckinInfo.checkedAt)}
+                            </div>
+                            {upstreamCheckinInfo.reward && (
+                              <div>
+                                {t('最近奖励')}: {upstreamCheckinInfo.reward}
+                              </div>
+                            )}
+                            {upstreamCheckinInfo.message && (
+                              <div>
+                                {t('返回信息')}: {upstreamCheckinInfo.message}
+                              </div>
+                            )}
+                            {upstreamCheckinInfo.reason && (
+                              <div className='text-red-500'>
+                                {t('失败原因')}: {upstreamCheckinInfo.reason}
+                              </div>
+                            )}
+                          </div>
+
+                          <Button
+                            type='primary'
+                            theme='solid'
+                            icon={<IconBolt size={14} />}
+                            loading={upstreamCheckinLoading}
+                            disabled={!isEdit}
+                            onClick={handleRunUpstreamCheckin}
+                          >
+                            {isEdit ? t('立即签到') : t('保存后可签到')}
+                          </Button>
+                        </div>
+                      </div>
                     </Card>
                   </div>
                 )}

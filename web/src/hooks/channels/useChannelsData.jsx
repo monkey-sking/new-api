@@ -37,6 +37,7 @@ import { useIsMobile } from '../common/useIsMobile';
 import { useTableCompactMode } from '../common/useTableCompactMode';
 import { useChannelUpstreamUpdates } from './useChannelUpstreamUpdates';
 import { parseUpstreamUpdateMeta } from './upstreamUpdateUtils';
+import { getChannelUpstreamCheckinState } from './upstreamCheckinUtils';
 import { Modal, Button } from '@douyinfe/semi-ui';
 import { openCodexUsageModal } from '../../components/table/channels/modals/CodexUsageModal';
 
@@ -202,6 +203,9 @@ export const useChannelsData = () => {
   // Multi-key management states
   const [showMultiKeyManageModal, setShowMultiKeyManageModal] = useState(false);
   const [currentMultiKeyChannel, setCurrentMultiKeyChannel] = useState(null);
+  const [upstreamCheckinLoadingMap, setUpstreamCheckinLoadingMap] = useState(
+    {},
+  );
 
   // Refs
   const requestCounter = useRef(0);
@@ -223,6 +227,7 @@ export const useChannelsData = () => {
     STATUS: 'status',
     HEALTH: 'health',
     BALANCE_CHECK: 'balance_check',
+    UPSTREAM_CHECKIN: 'upstream_checkin',
     RESPONSE_TIME: 'response_time',
     BALANCE: 'balance',
     PRIORITY: 'priority',
@@ -265,6 +270,7 @@ export const useChannelsData = () => {
       [COLUMN_KEYS.STATUS]: true,
       [COLUMN_KEYS.HEALTH]: true,
       [COLUMN_KEYS.BALANCE_CHECK]: true,
+      [COLUMN_KEYS.UPSTREAM_CHECKIN]: true,
       [COLUMN_KEYS.RESPONSE_TIME]: true,
       [COLUMN_KEYS.BALANCE]: true,
       [COLUMN_KEYS.PRIORITY]: true,
@@ -687,6 +693,51 @@ export const useChannelsData = () => {
         t('渠道复制失败: ') +
           (error?.response?.data?.message || error?.message || error),
       );
+    }
+  };
+
+  const runChannelUpstreamCheckin = async (record) => {
+    const channelID = record?.id;
+    if (!channelID) {
+      return false;
+    }
+
+    const checkinState = getChannelUpstreamCheckinState(record);
+    if (!checkinState.available) {
+      showInfo(t('先在渠道里选择上游预设并配置签到信息'));
+      return false;
+    }
+    if (!checkinState.configured) {
+      showInfo(t('先在渠道里填写签到 Access Token，按需补用户 ID'));
+      return false;
+    }
+
+    setUpstreamCheckinLoadingMap((prev) => ({
+      ...prev,
+      [channelID]: true,
+    }));
+
+    try {
+      const res = await API.post(
+        `/api/channel/${channelID}/upstream_checkin`,
+        {},
+        { skipErrorHandler: true },
+      );
+      if (res?.data?.success) {
+        showSuccess(res.data.message || t('签到成功'));
+      } else {
+        showInfo(res?.data?.message || t('签到已执行'));
+      }
+      await refresh(activePage);
+      return true;
+    } catch (error) {
+      showError(error.message || t('签到失败'));
+      return false;
+    } finally {
+      setUpstreamCheckinLoadingMap((prev) => ({
+        ...prev,
+        [channelID]: false,
+      }));
     }
   };
 
@@ -1300,6 +1351,8 @@ export const useChannelsData = () => {
     setShowMultiKeyManageModal,
     currentMultiKeyChannel,
     setCurrentMultiKeyChannel,
+    upstreamCheckinLoadingMap,
+    runChannelUpstreamCheckin,
     ...upstreamUpdates,
 
     // Form

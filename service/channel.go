@@ -1,8 +1,10 @@
 package service
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -39,6 +41,77 @@ var builtinUnavailablePoolSignals = []string{
 	"no available accounts",
 	"no available channel",
 	"no available channels",
+}
+
+var builtinHardFailureSignals = []string{
+	"cloudflare tunnel",
+	"unable to reach it",
+	"first path segment in url cannot contain colon",
+	"missing protocol scheme",
+}
+
+func parseStoredStatusReason(reason string) *types.NewAPIError {
+	trimmed := strings.TrimSpace(reason)
+	if trimmed == "" {
+		return nil
+	}
+
+	statusCode := 0
+	message := trimmed
+	if strings.HasPrefix(trimmed, "status_code=") {
+		rest := strings.TrimPrefix(trimmed, "status_code=")
+		parts := strings.SplitN(rest, ",", 2)
+		if code, err := strconv.Atoi(strings.TrimSpace(parts[0])); err == nil {
+			statusCode = code
+		}
+		if len(parts) == 2 {
+			message = strings.TrimSpace(parts[1])
+		} else if statusCode != 0 {
+			message = http.StatusText(statusCode)
+		}
+	}
+
+	if message == "" {
+		message = trimmed
+	}
+
+	return types.NewOpenAIError(errors.New(message), types.ErrorCodeBadResponseStatusCode, statusCode)
+}
+
+func ShouldDisableChannelFromStoredReason(channelType int, reason string) bool {
+	return ShouldDisableChannel(channelType, parseStoredStatusReason(reason))
+}
+
+func DisableStaleChannelsByStoredReason() int {
+	if !common.AutomaticDisableChannelEnabled {
+		return 0
+	}
+
+	channels, err := model.GetAllChannels(0, 0, true, false)
+	if err != nil {
+		common.SysLog(fmt.Sprintf("failed to load channels for stale auto-disable sweep: %v", err))
+		return 0
+	}
+
+	disabledCount := 0
+	for _, channel := range channels {
+		if channel == nil || channel.Status != common.ChannelStatusEnabled || !channel.GetAutoBan() {
+			continue
+		}
+
+		info := channel.GetOtherInfo()
+		reason, _ := info["status_reason"].(string)
+		if !ShouldDisableChannelFromStoredReason(channel.Type, reason) {
+			continue
+		}
+
+		if model.UpdateChannelStatus(channel.Id, "", common.ChannelStatusAutoDisabled, reason) {
+			disabledCount++
+			common.SysLog(fmt.Sprintf("stale auto-disable sweep disabled channel #%d (%s): %s", channel.Id, channel.Name, reason))
+		}
+	}
+
+	return disabledCount
 }
 
 func formatNotifyType(channelId int, status int) string {
@@ -137,6 +210,11 @@ func ShouldDisableChannel(channelType int, err *types.NewAPIError) bool {
 		}
 	}
 	for _, signal := range builtinUnavailablePoolSignals {
+		if strings.Contains(lowerMessage, signal) {
+			return true
+		}
+	}
+	for _, signal := range builtinHardFailureSignals {
 		if strings.Contains(lowerMessage, signal) {
 			return true
 		}

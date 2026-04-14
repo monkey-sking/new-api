@@ -61,6 +61,7 @@ export default function SettingsSidebarModulesAdmin(props) {
     admin: {
       enabled: true,
       channel: true,
+      channel_upstream: true,
       models: true,
       deployment: true,
       redemption: true,
@@ -122,6 +123,7 @@ export default function SettingsSidebarModulesAdmin(props) {
       admin: {
         enabled: true,
         channel: true,
+        channel_upstream: true,
         models: true,
         deployment: true,
         redemption: true,
@@ -191,6 +193,7 @@ export default function SettingsSidebarModulesAdmin(props) {
           admin: {
             enabled: true,
             channel: true,
+            channel_upstream: true,
             models: true,
             deployment: true,
             redemption: true,
@@ -254,6 +257,11 @@ export default function SettingsSidebarModulesAdmin(props) {
       description: t('系统管理功能'),
       modules: [
         { key: 'channel', title: t('渠道管理'), description: t('API渠道配置') },
+        {
+          key: 'channel_upstream',
+          title: t('上游运营'),
+          description: t('上游签到与失败排查'),
+        },
         { key: 'models', title: t('模型管理'), description: t('AI模型配置') },
         {
           key: 'deployment',

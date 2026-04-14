@@ -78,6 +78,15 @@ type ChannelBalanceCheck struct {
 	Reason    string `json:"reason,omitempty"`
 }
 
+type ChannelUpstreamCheckin struct {
+	Status    string `json:"status"`
+	CheckedAt int64  `json:"checked_at"`
+	Trigger   string `json:"trigger,omitempty"`
+	Reason    string `json:"reason,omitempty"`
+	Reward    string `json:"reward,omitempty"`
+	Message   string `json:"message,omitempty"`
+}
+
 const (
 	ChannelBalanceCheckStatusUnchecked = "unchecked"
 	ChannelBalanceCheckStatusSuccess   = "success"
@@ -86,10 +95,23 @@ const (
 )
 
 const (
+	ChannelUpstreamCheckinStatusUnchecked = "unchecked"
+	ChannelUpstreamCheckinStatusSuccess   = "success"
+	ChannelUpstreamCheckinStatusFailed    = "failed"
+	ChannelUpstreamCheckinStatusSkipped   = "skipped"
+)
+
+const (
 	channelOtherInfoBalanceCheckStatus  = "balance_check_status"
 	channelOtherInfoBalanceCheckTime    = "balance_check_time"
 	channelOtherInfoBalanceCheckTrigger = "balance_check_trigger"
 	channelOtherInfoBalanceCheckReason  = "balance_check_reason"
+	channelOtherInfoUpstreamCheckinStatus  = "upstream_checkin_status"
+	channelOtherInfoUpstreamCheckinTime    = "upstream_checkin_time"
+	channelOtherInfoUpstreamCheckinTrigger = "upstream_checkin_trigger"
+	channelOtherInfoUpstreamCheckinReason  = "upstream_checkin_reason"
+	channelOtherInfoUpstreamCheckinReward  = "upstream_checkin_reward"
+	channelOtherInfoUpstreamCheckinMessage = "upstream_checkin_message"
 )
 
 type ChannelInfo struct {
@@ -305,6 +327,18 @@ func channelBalanceCheckString(v interface{}) string {
 	return ""
 }
 
+func normalizeChannelUpstreamCheckinStatus(status string) string {
+	switch status {
+	case ChannelUpstreamCheckinStatusSuccess,
+		ChannelUpstreamCheckinStatusFailed,
+		ChannelUpstreamCheckinStatusSkipped,
+		ChannelUpstreamCheckinStatusUnchecked:
+		return status
+	default:
+		return ChannelUpstreamCheckinStatusUnchecked
+	}
+}
+
 func (channel *Channel) GetBalanceCheck() *ChannelBalanceCheck {
 	info := channel.GetOtherInfo()
 	result := &ChannelBalanceCheck{
@@ -353,6 +387,51 @@ func (channel *Channel) MarkBalanceCheckFailure(reason string, trigger string) {
 
 func (channel *Channel) MarkBalanceCheckSkipped(reason string, trigger string) {
 	channel.updateBalanceCheckResult(ChannelBalanceCheckStatusSkipped, trigger, reason)
+}
+
+func (channel *Channel) GetUpstreamCheckin() *ChannelUpstreamCheckin {
+	info := channel.GetOtherInfo()
+	result := &ChannelUpstreamCheckin{
+		Status: normalizeChannelUpstreamCheckinStatus(channelBalanceCheckString(info[channelOtherInfoUpstreamCheckinStatus])),
+	}
+	result.CheckedAt = channelBalanceCheckInt64(info[channelOtherInfoUpstreamCheckinTime])
+	result.Trigger = channelBalanceCheckString(info[channelOtherInfoUpstreamCheckinTrigger])
+	result.Reason = channelBalanceCheckString(info[channelOtherInfoUpstreamCheckinReason])
+	result.Reward = channelBalanceCheckString(info[channelOtherInfoUpstreamCheckinReward])
+	result.Message = channelBalanceCheckString(info[channelOtherInfoUpstreamCheckinMessage])
+	return result
+}
+
+func (channel *Channel) SetUpstreamCheckinResult(result *ChannelUpstreamCheckin) {
+	if result == nil {
+		return
+	}
+	info := channel.GetOtherInfo()
+	info[channelOtherInfoUpstreamCheckinStatus] = normalizeChannelUpstreamCheckinStatus(result.Status)
+	if result.CheckedAt > 0 {
+		info[channelOtherInfoUpstreamCheckinTime] = result.CheckedAt
+	}
+	if result.Trigger != "" {
+		info[channelOtherInfoUpstreamCheckinTrigger] = result.Trigger
+	} else {
+		delete(info, channelOtherInfoUpstreamCheckinTrigger)
+	}
+	if strings.TrimSpace(result.Reason) != "" {
+		info[channelOtherInfoUpstreamCheckinReason] = result.Reason
+	} else {
+		delete(info, channelOtherInfoUpstreamCheckinReason)
+	}
+	if strings.TrimSpace(result.Reward) != "" {
+		info[channelOtherInfoUpstreamCheckinReward] = result.Reward
+	} else {
+		delete(info, channelOtherInfoUpstreamCheckinReward)
+	}
+	if strings.TrimSpace(result.Message) != "" {
+		info[channelOtherInfoUpstreamCheckinMessage] = result.Message
+	} else {
+		delete(info, channelOtherInfoUpstreamCheckinMessage)
+	}
+	channel.SetOtherInfo(info)
 }
 
 func (channel *Channel) GetTag() string {

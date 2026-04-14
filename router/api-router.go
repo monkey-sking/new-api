@@ -245,6 +245,9 @@ func SetApiRouter(router *gin.Engine) {
 			channelRoute.POST("/upstream_updates/apply_all", controller.ApplyAllChannelUpstreamModelUpdates)
 			channelRoute.POST("/upstream_updates/detect", controller.DetectChannelUpstreamModelUpdates)
 			channelRoute.POST("/upstream_updates/detect_all", controller.DetectAllChannelUpstreamModelUpdates)
+			channelRoute.GET("/upstream/presets", controller.ListUpstreamChannelPresets)
+			channelRoute.POST("/upstream/detect", controller.DetectUpstreamChannelPreset)
+			channelRoute.POST("/:id/upstream_checkin", controller.RunChannelUpstreamCheckin)
 		}
 		tokenRoute := apiRouter.Group("/token")
 		tokenRoute.Use(middleware.UserAuth())
@@ -267,6 +270,22 @@ func SetApiRouter(router *gin.Engine) {
 			{
 				tokenUsageRoute.GET("/", controller.GetTokenUsage)
 			}
+		}
+
+		upstreamRoute := apiRouter.Group("/upstream")
+		upstreamRoute.Use(middleware.AdminAuth())
+		{
+			upstreamRoute.GET("/sites", controller.GetUpstreamSites)
+			upstreamRoute.POST("/sites", controller.CreateUpstreamSite)
+			upstreamRoute.PUT("/sites", controller.UpdateUpstreamSite)
+			upstreamRoute.DELETE("/sites/:id", controller.DeleteUpstreamSite)
+			upstreamRoute.GET("/accounts", controller.GetUpstreamAccounts)
+			upstreamRoute.POST("/accounts", controller.CreateUpstreamAccount)
+			upstreamRoute.PUT("/accounts", controller.UpdateUpstreamAccount)
+			upstreamRoute.DELETE("/accounts/:id", controller.DeleteUpstreamAccount)
+			upstreamRoute.POST("/accounts/:id/refresh_session", controller.RefreshUpstreamAccountSession)
+			upstreamRoute.POST("/accounts/:id/checkin", controller.RunUpstreamAccountCheckin)
+			upstreamRoute.GET("/checkin_logs", controller.GetUpstreamCheckinLogs)
 		}
 
 		redemptionRoute := apiRouter.Group("/redemption")

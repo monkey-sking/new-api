@@ -45,6 +45,10 @@ import {
 } from '../../../constants';
 import { parseUpstreamUpdateMeta } from '../../../hooks/channels/upstreamUpdateUtils';
 import {
+  getChannelUpstreamCheckinState,
+  getUpstreamCheckinStatusMeta,
+} from '../../../hooks/channels/upstreamCheckinUtils';
+import {
   IconTreeTriangleDown,
   IconMore,
   IconAlertTriangle,
@@ -349,6 +353,75 @@ const renderBalanceCheck = (balanceCheck, t) => {
   );
 };
 
+const getUpstreamCheckinTriggerLabel = (trigger, t) => {
+  switch (trigger) {
+    case 'auto':
+      return t('自动签到');
+    case 'manual':
+      return t('手动签到');
+    default:
+      return t('未知');
+  }
+};
+
+const renderUpstreamCheckin = (record, t) => {
+  const checkinState = getChannelUpstreamCheckinState(record);
+  if (!checkinState.available) {
+    return <Typography.Text type='tertiary'>-</Typography.Text>;
+  }
+
+  const statusMeta = getUpstreamCheckinStatusMeta(checkinState.info.status, t);
+  const tagLabel = checkinState.configured ? statusMeta.label : t('未配置');
+  const tagColor = checkinState.configured ? statusMeta.color : 'grey';
+  const tooltipLines = [t('最近一次上游签到状态')];
+
+  tooltipLines.push(`${t('状态')}：${tagLabel}`);
+  if (checkinState.info.checkedAt > 0) {
+    tooltipLines.push(
+      `${t('时间')}：${timestamp2string(checkinState.info.checkedAt)}`,
+    );
+  }
+  if (checkinState.info.trigger) {
+    tooltipLines.push(
+      `${t('触发方式')}：${getUpstreamCheckinTriggerLabel(
+        checkinState.info.trigger,
+        t,
+      )}`,
+    );
+  }
+  if (checkinState.info.reward) {
+    tooltipLines.push(`${t('奖励')}：${checkinState.info.reward}`);
+  }
+  if (checkinState.info.message) {
+    tooltipLines.push(`${t('返回信息')}：${checkinState.info.message}`);
+  }
+  if (checkinState.info.reason) {
+    tooltipLines.push(`${t('失败原因')}：${checkinState.info.reason}`);
+  }
+  if (!checkinState.configured) {
+    tooltipLines.push(t('还没有填写签到 Access Token，用户 ID 视上游面板而定。'));
+  }
+
+  return (
+    <Tooltip
+      content={
+        <div className='flex flex-col gap-1 max-w-xs'>
+          {tooltipLines.map((line) => (
+            <Typography.Text key={line} size='small'>
+              {line}
+            </Typography.Text>
+          ))}
+        </div>
+      }
+      position='topLeft'
+    >
+      <Tag color={tagColor} shape='circle'>
+        {tagLabel}
+      </Tag>
+    </Tooltip>
+  );
+};
+
 const renderMultiKeyStatus = (status, keySize, enabledKeySize, t) => {
   switch (status) {
     case 1:
@@ -486,6 +559,8 @@ export const getChannelsColumns = ({
   checkOllamaVersion,
   setShowMultiKeyManageModal,
   setCurrentMultiKeyChannel,
+  upstreamCheckinLoadingMap,
+  runChannelUpstreamCheckin,
   openUpstreamUpdateModal,
   detectChannelUpstreamUpdates,
 }) => {
@@ -694,6 +769,14 @@ export const getChannelsColumns = ({
       },
     },
     {
+      key: COLUMN_KEYS.UPSTREAM_CHECKIN,
+      title: t('上游签到'),
+      dataIndex: 'other_info',
+      render: (text, record, index) => {
+        return renderUpstreamCheckin(record, t);
+      },
+    },
+    {
       key: COLUMN_KEYS.RESPONSE_TIME,
       title: t('响应时间'),
       dataIndex: 'response_time',
@@ -862,6 +945,7 @@ export const getChannelsColumns = ({
       render: (text, record, index) => {
         if (record.children === undefined) {
           const upstreamUpdateMeta = getUpstreamUpdateMeta(record);
+          const upstreamCheckinState = getChannelUpstreamCheckinState(record);
           const moreMenuItems = [
             {
               node: 'item',
@@ -968,6 +1052,33 @@ export const getChannelsColumns = ({
                   }}
                 />
               </SplitButtonGroup>
+
+              {upstreamCheckinState.available && (
+                <Tooltip
+                  content={
+                    upstreamCheckinState.configured
+                      ? t('立即执行上游签到')
+                      : t('先补全签到配置')
+                  }
+                >
+                  <Button
+                    size='small'
+                    type='tertiary'
+                    loading={upstreamCheckinLoadingMap?.[record.id] === true}
+                    onClick={async () => {
+                      if (!upstreamCheckinState.configured) {
+                        showInfo(t('先在编辑页补全签到配置'));
+                        setEditingChannel(record);
+                        setShowEdit(true);
+                        return;
+                      }
+                      await runChannelUpstreamCheckin?.(record);
+                    }}
+                  >
+                    {t('签到')}
+                  </Button>
+                </Tooltip>
+              )}
 
               {record.status === 1 ? (
                 <Button
